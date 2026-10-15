@@ -2,11 +2,15 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 Department = Literal["fire", "police", "medical", "disaster", "utilities", "none"]
 Channel = Literal["call", "sms", "web", "whatsapp"]
 DecisionSource = Literal["local", "llm", "rules"]
+Lane = Literal["auto", "confirm", "review"]
+
+AUTO_DISPATCH_CONF = 0.9
+REVIEW_BELOW_CONF = 0.5
 
 
 class Decision(BaseModel):
@@ -28,14 +32,36 @@ class Decision(BaseModel):
     needs_human_review: bool = False
 
 
+    @property
+    def confidence(self) -> float:
+        """The weaker of the emergency call (either way) and the department call."""
+        return min(max(self.emergency_prob, 1.0 - self.emergency_prob), self.department_conf)
+
+    @property
+    def lane(self) -> Lane:
+        """Confidence gate: auto-dispatch, one-click confirm, or the human review lane."""
+        if self.needs_human_review or self.silent_sos or self.confidence < REVIEW_BELOW_CONF:
+            return "review"
+        if (
+            self.is_emergency
+            and self.emergency_prob >= AUTO_DISPATCH_CONF
+            and self.department_conf >= AUTO_DISPATCH_CONF
+        ):
+            return "auto"
+        return "confirm"
+
+
 class DecisionResult(BaseModel):
-    """A decision plus where it came from and how confident the producer was."""
+    """A decision plus who produced it, how confident it was and which rules fired."""
 
     model_config = ConfigDict(frozen=True)
 
     decision: Decision
     source: DecisionSource
     confidence: float = Field(ge=0.0, le=1.0)
+    model: str
+    prompt_version: str | None = None
+    rules_fired: list[str] = Field(default_factory=list)
 
 
 class ReportIn(BaseModel):
@@ -63,3 +89,8 @@ class Report(BaseModel):
     incident_id: str | None = None
     flags: list[str] = Field(default_factory=list)
     source: DecisionSource | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def lane(self) -> Lane | None:
+        return self.decision.lane if self.decision else None

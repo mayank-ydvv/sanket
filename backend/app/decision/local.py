@@ -16,14 +16,13 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import FeatureUnion
 
-from app.models import Decision, DecisionResult
+from app.models import REVIEW_BELOW_CONF, Decision, DecisionResult
 
 MODEL_VERSION = "local-v1"
 # Splits on whitespace and punctuation (incl. the Devanagari danda) but keeps
 # combining vowel signs inside tokens, which the default \w pattern would cut.
 TOKEN_PATTERN = r"[^\s.,!?;:()\"'।|/\-]+"
 ALERT_SEVERITY = 4
-REVIEW_BELOW_CONF = 0.5
 
 
 def build_features() -> FeatureUnion:
@@ -110,18 +109,22 @@ class LocalClassifier:
         results: list[DecisionResult] = []
         for i in range(len(texts)):
             prob = float(p_emergency[i])
-            dept_conf = float(dept_proba[i, dept_idx[i]])
             is_emergency = prob >= 0.5
             severity = int(m.severity.classes_[sev_idx[i]])
-            confidence = min(max(prob, 1.0 - prob), dept_conf)
             decision = Decision(
                 is_emergency=is_emergency,
                 emergency_prob=prob,
                 department=str(m.department.classes_[dept_idx[i]]),  # type: ignore[arg-type]
-                department_conf=dept_conf,
+                department_conf=float(dept_proba[i, dept_idx[i]]),
                 severity=severity,
                 alert_now=is_emergency and severity >= ALERT_SEVERITY,
-                needs_human_review=confidence < REVIEW_BELOW_CONF,
             )
-            results.append(DecisionResult(decision=decision, source="local", confidence=confidence))
+            needs_review = decision.confidence < REVIEW_BELOW_CONF
+            if needs_review:
+                decision = decision.model_copy(update={"needs_human_review": True})
+            results.append(
+                DecisionResult(
+                    decision=decision, source="local", confidence=decision.confidence, model=m.version
+                )
+            )
         return results

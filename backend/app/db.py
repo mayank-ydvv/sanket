@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Self
@@ -72,6 +73,7 @@ CREATE INDEX IF NOT EXISTS idx_reports_incident ON reports(incident_id);
 CREATE INDEX IF NOT EXISTS idx_reports_received ON reports(received_at);
 CREATE INDEX IF NOT EXISTS idx_incidents_status_updated ON incidents(status, last_updated);
 CREATE INDEX IF NOT EXISTS idx_alerts_incident ON alerts(incident_id);
+CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity, entity_id);
 """
 
 _REPORT_COLUMNS = (
@@ -138,15 +140,43 @@ class Database:
         await self._conn.commit()
 
     async def save_decisions(self, items: Sequence[tuple[str, DecisionResult]]) -> None:
-        """Store a batch of decisions in one transaction. O(b log n) for a batch of b."""
+        """Store a batch of decisions and their audit rows in one transaction. O(b log n)."""
+        now = time.time()
         await self._conn.executemany(
-            "UPDATE reports SET decision_json = ?, confidence = ?, source = ? WHERE id = ?",
+            "UPDATE reports SET decision_json = ?, confidence = ?, source = ?, flags = ? WHERE id = ?",
             [
-                (result.decision.model_dump_json(), result.confidence, result.source, report_id)
+                (
+                    result.decision.model_dump_json(),
+                    result.confidence,
+                    result.source,
+                    json.dumps(result.rules_fired),
+                    report_id,
+                )
+                for report_id, result in items
+            ],
+        )
+        await self._conn.executemany(
+            "INSERT INTO audit_log (entity, entity_id, action, actor, before, after, at) "
+            "VALUES ('report', ?, 'decided', ?, NULL, ?, ?)",
+            [
+                (
+                    report_id,
+                    result.model,
+                    result.model_dump_json(include={"decision", "source", "confidence", "prompt_version", "rules_fired"}),
+                    now,
+                )
                 for report_id, result in items
             ],
         )
         await self._conn.commit()
+
+    async def audit_for(self, entity: str, entity_id: str) -> list[dict[str, object]]:
+        """Audit trail of one entity, oldest first. O(log n + k) via idx_audit_entity."""
+        async with self._conn.execute(
+            "SELECT action, actor, before, after, at FROM audit_log WHERE entity = ? AND entity_id = ? ORDER BY id",
+            (entity, entity_id),
+        ) as cursor:
+            return [dict(row) for row in await cursor.fetchall()]
 
     async def recent_reports(self, limit: int) -> list[Report]:
         """Newest ``limit`` reports. O(log n + limit) via the received_at index."""

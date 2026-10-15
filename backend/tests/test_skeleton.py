@@ -60,7 +60,7 @@ def test_list_reports_returns_decided_report(client: TestClient) -> None:
         ws.receive_json()
     reports = client.get("/reports").json()
     assert [r["raw_text"] for r in reports] == ["accident on expressway"]
-    assert reports[0]["source"] == "rules"
+    assert reports[0]["source"] == "local"
 
 
 def test_invalid_report_rejected(client: TestClient) -> None:
@@ -81,3 +81,15 @@ def test_decision_schema_is_strict() -> None:
     for bad in ({"severity": 6}, {"department": "army"}, {"emergency_prob": "0.9"}, {"foo": 1}):
         with pytest.raises(ValidationError):
             Decision.model_validate(valid | bad)
+
+
+def test_decision_is_audited(client: TestClient, settings: Settings) -> None:
+    with client.websocket_connect("/ws") as ws:
+        report_id = client.post("/reports", json={"text": "1111 1111 1111"}).json()["id"]
+        data = ws.receive_json()["data"]
+    assert data["decision"]["silent_sos"] and data["lane"] == "review"
+    assert data["flags"] == ["silent_sos:tap_code"] and data["source"] == "rules"
+    row = sqlite3.connect(settings.db_path).execute(
+        "SELECT action, actor, after FROM audit_log WHERE entity = 'report' AND entity_id = ?", (report_id,)
+    ).fetchone()
+    assert row[0] == "decided" and row[1] == "untriaged" and "silent_sos" in row[2]

@@ -20,6 +20,38 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5190"]
     ingest_batch_size: int = Field(25, ge=1)
     ingest_batch_wait_ms: int = Field(50, ge=0)
+    decide_concurrency: int = Field(8, ge=1)
+
+    # Confidence gates (see README: auto-dispatch / one-click confirm / human review).
+    conf_threshold: float = Field(0.8, ge=0.0, le=1.0)
+
+    # Rules
+    prank_window_s: float = Field(600.0, gt=0)
+    prank_min_reports: int = Field(3, ge=1)
+
+    # Fast LLM (System 1 fallback). A provider is enabled when its key is set.
+    llm_batch_size: int = Field(25, ge=1)
+    llm_batch_wait_ms: int = Field(300, ge=0)
+    llm_max_concurrency: int = Field(4, ge=1)
+    llm_timeout_s: float = Field(8.0, gt=0)
+    llm_max_queue_wait_s: float = Field(1.5, ge=0)
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-2.5-flash"
+    gemini_rpm: int = 10
+    gemini_tpm: int = 250_000
+    groq_api_key: str | None = None
+    groq_model: str = "llama-3.1-8b-instant"
+    groq_rpm: int = 30
+    groq_tpm: int = 6_000
+    openrouter_api_key: str | None = None
+    openrouter_model: str = "meta-llama/llama-3.3-70b-instruct:free"
+    openrouter_rpm: int = 20
+    openrouter_tpm: int = 100_000
+    custom_llm_base_url: str | None = None
+    custom_llm_api_key: str | None = None
+    custom_llm_model: str | None = None
+    custom_llm_rpm: int = 30
+    custom_llm_tpm: int = 100_000
 
     @field_validator("db_path", "local_model_path")
     @classmethod
