@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Department, Report } from "../types";
+import type { Department, Lane, Report } from "../types";
 
 const DEPT_STYLE: Record<Department, string> = {
   fire: "bg-orange-500/15 text-orange-300 ring-orange-500/30",
@@ -8,6 +8,18 @@ const DEPT_STYLE: Record<Department, string> = {
   disaster: "bg-violet-500/15 text-violet-300 ring-violet-500/30",
   utilities: "bg-amber-500/15 text-amber-300 ring-amber-500/30",
   none: "bg-slate-500/15 text-slate-300 ring-slate-500/30",
+};
+
+const LANE_STYLE: Record<Lane, { label: string; className: string }> = {
+  auto: { label: "auto-dispatch", className: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30" },
+  confirm: { label: "confirm", className: "bg-sky-500/15 text-sky-300 ring-sky-500/30" },
+  review: { label: "human review", className: "bg-yellow-400/15 text-yellow-200 ring-yellow-400/30" },
+};
+
+const RULE_LABEL: Record<string, string> = {
+  silent_sos: "silent SOS",
+  severity_floor: "life-safety floor",
+  prank_suspected: "prank?",
 };
 
 const timeFormat = new Intl.DateTimeFormat(undefined, {
@@ -45,9 +57,19 @@ export function ReportCard({ report }: { report: Report }) {
               {Math.round(report.confidence * 100)}% · {report.source}
             </Badge>
           )}
-          {decision.needs_human_review && (
-            <Badge className="bg-yellow-400/15 text-yellow-200 ring-yellow-400/30">needs review</Badge>
+          {report.lane && (
+            <Badge className={LANE_STYLE[report.lane].className}>{LANE_STYLE[report.lane].label}</Badge>
           )}
+          {report.flags.map((flag) => (
+            <Badge key={flag} className="bg-rose-500/15 text-rose-200 ring-rose-500/30">
+              {RULE_LABEL[flag.split(":")[0]] ?? flag}
+            </Badge>
+          ))}
+          {decision.hazards.map((hazard) => (
+            <Badge key={hazard} className="bg-white/5 text-mute ring-white/10">
+              {hazard.replace("_", " ")}
+            </Badge>
+          ))}
         </div>
       )}
     </li>
