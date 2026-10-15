@@ -1,10 +1,12 @@
 """Decision pipeline: turns a batch of reports into triage decisions."""
 
+import asyncio
 from collections.abc import Sequence
 
+from app.decision.local import LocalClassifier
 from app.models import Decision, DecisionResult, Report
 
-_UNTRIAGED = DecisionResult(
+UNTRIAGED = DecisionResult(
     decision=Decision(
         is_emergency=True,
         emergency_prob=0.5,
@@ -19,10 +21,14 @@ _UNTRIAGED = DecisionResult(
 )
 
 
-async def decide_batch(reports: Sequence[Report]) -> list[DecisionResult]:
-    """Return one decision per report, in order. O(b).
+class DecisionPipeline:
+    """System 1 decisions. Without a trained model every report goes to human review."""
 
-    Until the classifier exists every report is treated as a possible
-    emergency and sent to human review: never dismissed, never auto-dispatched.
-    """
-    return [_UNTRIAGED for _ in reports]
+    def __init__(self, local: LocalClassifier | None) -> None:
+        self._local = local
+
+    async def decide_batch(self, reports: Sequence[Report]) -> list[DecisionResult]:
+        """One decision per report, in order. O(b·L), run off the event loop."""
+        if self._local is None:
+            return [UNTRIAGED for _ in reports]
+        return await asyncio.to_thread(self._local.predict_batch, [r.raw_text for r in reports])

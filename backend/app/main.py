@@ -12,9 +12,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import ws
 from app.config import Settings, get_settings
 from app.db import Database
-from app.decision.pipeline import decide_batch
+from app.decision.local import LocalClassifier
+from app.decision.pipeline import DecisionPipeline
 from app.intake import reports
 from app.worker import PipelineWorker
+
+log = logging.getLogger(__name__)
+
+
+async def load_local_classifier(settings: Settings) -> LocalClassifier | None:
+    """Load the trained model off the event loop; a missing model degrades to review-all."""
+    path = settings.local_model_path
+    if not path.exists():
+        log.error("local model not found at %s; run `python -m scripts.train_local`", path)
+        return None
+    classifier = await asyncio.to_thread(LocalClassifier.load, path)
+    log.info("loaded local classifier %s", classifier.model.version)
+    return classifier
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -27,8 +41,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         db = await Database.open(cfg.db_path)
         http = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
         hub = ws.Hub()
+        pipeline = DecisionPipeline(await load_local_classifier(cfg))
         worker = PipelineWorker(
-            db, hub, decide_batch, cfg.ingest_batch_size, cfg.ingest_batch_wait_ms / 1000
+            db, hub, pipeline.decide_batch, cfg.ingest_batch_size, cfg.ingest_batch_wait_ms / 1000
         )
         task = asyncio.create_task(worker.run(), name="pipeline-worker")
         app.state.settings = cfg

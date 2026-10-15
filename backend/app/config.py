@@ -16,13 +16,14 @@ class Settings(BaseSettings):
 
     caller_salt: str = Field(min_length=16)
     db_path: Path = Path("backend/sanket.db")
+    local_model_path: Path = Path("backend/artifacts/local_v1.joblib")
     cors_origins: list[str] = ["http://localhost:5190"]
     ingest_batch_size: int = Field(25, ge=1)
     ingest_batch_wait_ms: int = Field(50, ge=0)
 
-    @field_validator("db_path")
+    @field_validator("db_path", "local_model_path")
     @classmethod
-    def _resolve_db_path(cls, value: Path) -> Path:
+    def _resolve_path(cls, value: Path) -> Path:
         return value if value.is_absolute() else ROOT / value
 
 
