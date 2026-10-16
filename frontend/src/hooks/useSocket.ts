@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import type { ServerEvent } from "../types";
+import type { ServerMessage } from "../types";
 
 export type SocketStatus = "connecting" | "open" | "closed";
 
 const MAX_BACKOFF_MS = 10_000;
 
-/** Keeps one WebSocket to /ws open, reconnecting with capped exponential backoff. */
-export function useSocket(onEvent: (event: ServerEvent) => void): SocketStatus {
+/** One WebSocket to /ws, reconnecting with capped exponential backoff. */
+export function useSocket(onMessage: (message: ServerMessage) => void, onOpen: () => void): SocketStatus {
   const [status, setStatus] = useState<SocketStatus>("connecting");
-  const handler = useRef(onEvent);
-  handler.current = onEvent;
+  const handlers = useRef({ onMessage, onOpen });
+  handlers.current = { onMessage, onOpen };
 
   useEffect(() => {
     let socket: WebSocket | null = null;
@@ -24,13 +24,13 @@ export function useSocket(onEvent: (event: ServerEvent) => void): SocketStatus {
       socket.onopen = () => {
         attempt = 0;
         setStatus("open");
+        handlers.current.onOpen();
       };
-      socket.onmessage = (message) => handler.current(JSON.parse(message.data) as ServerEvent);
+      socket.onmessage = (message) => handlers.current.onMessage(JSON.parse(message.data) as ServerMessage);
       socket.onclose = () => {
         setStatus("closed");
         if (stopped) return;
-        const delay = Math.min(MAX_BACKOFF_MS, 500 * 2 ** attempt++);
-        retryTimer = window.setTimeout(connect, delay);
+        retryTimer = window.setTimeout(connect, Math.min(MAX_BACKOFF_MS, 500 * 2 ** attempt++));
       };
     };
 

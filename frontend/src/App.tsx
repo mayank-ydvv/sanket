@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ReportCard } from "./components/ReportCard";
-import { useSocket, type SocketStatus } from "./hooks/useSocket";
-import type { Report, ServerEvent } from "./types";
-
-const MAX_REPORTS = 500;
+import { useMemo, useState } from "react";
+import { Board } from "./components/Board";
+import { IncidentDetail } from "./components/IncidentDetail";
+import { MapView } from "./components/MapView";
+import { useLiveState } from "./hooks/useLiveState";
+import { useNow } from "./hooks/useNow";
+import type { SocketStatus } from "./hooks/useSocket";
+import { liveAlertFor, rankIncidents } from "./lib/store";
 
 const STATUS_STYLE: Record<SocketStatus, string> = {
   open: "bg-emerald-400",
@@ -11,65 +13,67 @@ const STATUS_STYLE: Record<SocketStatus, string> = {
   closed: "bg-rose-500",
 };
 
-export default function App() {
-  const [reports, setReports] = useState<Map<string, Report>>(() => new Map());
-
-  const upsert = useCallback((incoming: Report[]) => {
-    setReports((prev) => {
-      const next = new Map(prev);
-      for (const report of incoming) next.set(report.id, report);
-      return next;
-    });
-  }, []);
-
-  const status = useSocket(
-    useCallback(
-      (event: ServerEvent) => {
-        if (event.type === "report.created") upsert([event.data]);
-      },
-      [upsert],
-    ),
+function Stat({ label, value, tone = "text-ink" }: { label: string; value: number; tone?: string }) {
+  return (
+    <div className="flex flex-col items-end leading-tight">
+      <span className={`font-mono text-lg font-semibold ${tone}`}>{value}</span>
+      <span className="text-[10px] uppercase tracking-wider text-mute">{label}</span>
+    </div>
   );
+}
 
-  useEffect(() => {
-    fetch("/api/reports?limit=100")
-      .then((response) => (response.ok ? (response.json() as Promise<Report[]>) : []))
-      .then(upsert)
-      .catch(() => undefined);
-  }, [upsert]);
+export default function App() {
+  const { state, status } = useLiveState();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const now = useNow();
 
-  const ordered = useMemo(
-    () =>
-      [...reports.values()].sort((a, b) => b.received_at - a.received_at).slice(0, MAX_REPORTS),
-    [reports],
+  // Re-sort only when the incidents map itself changed.
+  const ranked = useMemo(() => rankIncidents(state.incidents), [state.incidents]);
+  const selected = selectedId ? state.incidents.get(selectedId) : undefined;
+  const stats = useMemo(
+    () => ({
+      open: ranked.filter((i) => i.status === "open").length,
+      review: ranked.filter((i) => i.lane === "review" && i.status === "open").length,
+      alerting: ranked.filter((i) => liveAlertFor(state.alerts, i.id)).length,
+    }),
+    [ranked, state.alerts],
   );
 
   return (
-    <div className="mx-auto flex h-full max-w-3xl flex-col px-4 py-6">
-      <header className="flex items-center justify-between border-b border-line pb-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">
-            Sanket <span className="text-signal">·</span> triage board
-          </h1>
-          <p className="text-sm text-mute">Live reports from every channel</p>
+    <div className="flex h-full flex-col">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
+        <div className="flex items-center gap-3">
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight">
+              Sanket <span className="text-signal">·</span> control room
+            </h1>
+            <p className="flex items-center gap-1.5 text-xs text-mute">
+              <span className={`size-2 rounded-full ${STATUS_STYLE[status]}`} />
+              {status === "open" ? "live" : status} · Noida demo district
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-2 text-sm text-mute">
-          <span className={`size-2.5 rounded-full ${STATUS_STYLE[status]}`} />
-          {status === "open" ? "live" : status}
-          <span className="ml-3 rounded-md bg-panel px-2 py-0.5 font-mono text-ink">
-            {reports.size}
-          </span>
+        <div className="flex items-center gap-5">
+          <Stat label="open" value={stats.open} />
+          <Stat label="review" value={stats.review} tone="text-yellow-200" />
+          <Stat label="alerting" value={stats.alerting} tone="text-fuchsia-200" />
+          <Stat label="reports" value={state.reports.size} tone="text-mute" />
         </div>
       </header>
-      {ordered.length === 0 ? (
-        <p className="mt-16 text-center text-mute">Waiting for reports…</p>
-      ) : (
-        <ul className="mt-4 flex flex-col gap-3 pb-8">
-          {ordered.map((report) => (
-            <ReportCard key={report.id} report={report} />
-          ))}
-        </ul>
-      )}
+
+      <main className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] lg:grid-cols-[minmax(360px,440px)_1fr] lg:grid-rows-1">
+        <section className="min-h-0 overflow-y-auto border-line lg:border-r" aria-label="Ranked incidents">
+          <Board incidents={ranked} alerts={state.alerts} selectedId={selectedId} onSelect={setSelectedId} now={now} />
+        </section>
+        <section className="relative min-h-0" aria-label="Map">
+          <MapView incidents={ranked} selectedId={selectedId} onSelect={setSelectedId} />
+          {selected && (
+            <div className="absolute inset-0 z-[1000] sm:inset-y-3 sm:right-3 sm:left-auto sm:w-[460px]">
+              <IncidentDetail key={selected.id} incident={selected} alerts={state.alerts} onClose={() => setSelectedId(null)} />
+            </div>
+          )}
+        </section>
+      </main>
     </div>
   );
 }
