@@ -42,7 +42,7 @@ async def db(tmp_path: Path) -> Database:
 def nominatim(requests: list[httpx.Request], found: bool = True) -> httpx.AsyncClient:
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        body = [{"lat": "28.55", "lon": "77.35"}] if found else []
+        body = [{"lat": "28.55", "lon": "77.35", "display_name": "Lane, Sector 44, Noida"}] if found else []
         return httpx.Response(200, json=body)
 
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
@@ -85,7 +85,7 @@ async def test_one_request_per_second(db: Database) -> None:
     requests: list[httpx.Request] = []
     fake = FakeTime()
     geo = Geocoder(nominatim(requests), db, config(), clock=fake.clock, sleep=fake.sleep)
-    for name in ("alpha lane", "beta lane", "gamma lane"):
+    for name in ("alpha lane", "beta lane", "gamma lane"):  # "lane" matches the fake display_name
         await geo.geocode(name)
     assert len(requests) == 3
     assert fake.slept == [1.0, 1.0]
@@ -121,3 +121,35 @@ def test_extract_location(text: str, expected: str | None) -> None:
 def test_normalize_and_gazetteer() -> None:
     assert normalize("  SECTOR-18, Metro!! ") == "sector 18 metro"
     assert gazetteer_lookup("Botanical Garden metro station") is not None
+
+
+@pytest.mark.parametrize(
+    ("typo", "place"),
+    [
+        ("secor 76", "Sector 76"),
+        ("sectoor 18 metro", "Sector 18 metro"),
+        ("botanical gaden metro", "Botanical Garden metro"),
+        ("arjendra nagar shiv mandir", "Rajendra Nagar Shiv mandir"),
+    ],
+)
+def test_gazetteer_tolerates_typos(typo: str, place: str) -> None:
+    found = gazetteer_lookup(typo)
+    assert found is not None and found.name == place
+
+
+def test_normalize_keeps_indic_vowel_signs() -> None:
+    assert normalize("மூன்றாவது மாடியில்!") == "மூன்றாவது மாடியில்"
+    assert normalize("घर में") == "घर में"
+
+
+async def test_nominatim_hit_sharing_no_token_with_query_is_rejected(db: Database) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[{"lat": "28.57", "lon": "77.32", "display_name": "Sector 18, Noida, Uttar Pradesh"}])
+
+    geo = Geocoder(httpx.AsyncClient(transport=httpx.MockTransport(handler)), db, config())
+    assert await geo.geocode("மூன்றாவது மாடியில்") is None  # "on the 3rd floor" is not a place
+
+
+def test_fuzzy_match_never_changes_numbers() -> None:
+    assert gazetteer_lookup("Sector 44 market") is None
+    assert extract_location("aag lagi sector 44 market mein") == "Sector 44"

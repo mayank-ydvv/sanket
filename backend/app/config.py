@@ -7,6 +7,8 @@ from typing import Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.models import Contact
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -45,6 +47,21 @@ class Settings(BaseSettings):
     cluster_radius_km: float = Field(1.0, gt=0)
     cluster_window_s: float = Field(1800.0, gt=0)
     cluster_unlocated_candidates: int = Field(50, ge=1)
+
+    # Alerts: mock sender unless MOCK_ALERTS=false and Twilio credentials are set.
+    mock_alerts: bool = True
+    alert_ack_timeout_s: float = Field(90.0, gt=0)
+    twilio_account_sid: str | None = None
+    twilio_auth_token: str | None = None
+    twilio_from_number: str | None = None
+    alert_contacts: dict[str, list[Contact]] = {
+        "fire": [Contact(name="Fire station · Sector 6"), Contact(name="District fire officer")],
+        "police": [Contact(name="PCR van · Sector 20"), Contact(name="Police control room supervisor")],
+        "medical": [Contact(name="108 ambulance dispatch"), Contact(name="CMO duty officer")],
+        "disaster": [Contact(name="SDRF team · Noida"), Contact(name="DM control room")],
+        "utilities": [Contact(name="UPPCL emergency desk"), Contact(name="Utilities supervisor")],
+        "none": [Contact(name="Control room supervisor")],
+    }
 
     # Rules
     prank_window_s: float = Field(600.0, gt=0)

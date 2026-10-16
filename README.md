@@ -92,3 +92,27 @@ Score a running server against 100 held-out test reports:
 Known limit: a report with no usable location can only be matched by department and text,
 so when several same-department events are open at once (~7–9% of surge reports in tests)
 it may join the wrong one. These incidents are marked "location unconfirmed" for callback.
+
+## Live board, map and alerts
+
+- **Progressive decisions**: every report is decided by the local model + rules and placed on
+  the board immediately (`refining: true` if uncertain). The fast LLM re-checks uncertain
+  reports in the background; when it answers, the report is revised in place, and if its
+  department changed or it was finally located, it is re-clustered into the right incident.
+- **WebSocket** (`/ws`): events `report.created|updated`, `incident.created|updated`,
+  `alert.sent|updated`, delivered as one `batch` message at most every 100 ms (≤ 10/s).
+  Updates to the same entity within a window coalesce; `*.updated` events carry only the
+  fields that changed since the last send.
+- **Board**: incidents ranked by severity, then waiting time, with department, confidence,
+  lane (auto-dispatch / confirm / human review), silent SOS, prank, needs-review, location and
+  alert badges. **Map**: Leaflet pins coloured by severity, clusters coloured by their most
+  severe incident, centred on the demo district. **Detail**: merged reports (original text,
+  source, confidence, rules fired), alerts, audit trail; Confirm, Acknowledge, Override, Split.
+- **Lanes per incident**: any silent SOS → human review; else one report that clears the
+  auto-dispatch gate (both probabilities ≥ 0.9) → auto-dispatch; else review if at least half
+  the reports are flagged, otherwise one-click confirm.
+- **Alerts** (`app/alerts/`): auto-dispatch or one-click confirm alerts the first contact on
+  the department's ladder (mock sender, or Twilio SMS over the shared client). One scheduler
+  loop over a min-heap of deadlines escalates anything unacknowledged after 90 s to the next
+  contact; timers resume after a restart. Every alert, ack, escalation and override is audited.
+- **Endpoints**: `POST /incidents/{id}/confirm | /ack | /override | /split`, `GET /alerts`.

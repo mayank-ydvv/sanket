@@ -10,6 +10,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import incidents_api, ws
+from app.alerts.senders import AlertSender, MockSender, TwilioSmsSender
+from app.alerts.service import AlertService
 from app.cluster.embed import Embedder, HashingEmbedder, SentenceEmbedder
 from app.cluster.geocode import Geocoder, GeocoderConfig
 from app.cluster.index import IncidentIndex
@@ -51,6 +53,15 @@ async def load_embedder(settings: Settings) -> Embedder:
     return HashingEmbedder()
 
 
+def build_sender(settings: Settings, http: httpx.AsyncClient) -> AlertSender:
+    if settings.mock_alerts:
+        return MockSender()
+    if settings.twilio_account_sid and settings.twilio_auth_token and settings.twilio_from_number:
+        return TwilioSmsSender(http, settings.twilio_account_sid, settings.twilio_auth_token, settings.twilio_from_number)
+    log.error("MOCK_ALERTS=false but Twilio credentials are missing; using the mock sender")
+    return MockSender()
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the app. Tests pass their own settings (temp DB, fixed salt)."""
     cfg = settings or get_settings()
@@ -61,6 +72,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         db = await Database.open(cfg.db_path)
         http = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
         hub = ws.Hub()
+        broadcaster = ws.Broadcaster(hub)
         llm = build_llm_decider(cfg, http)
         if llm is None:
             log.warning("no LLM provider configured; uncertain reports keep their local decision")
@@ -90,7 +102,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         incidents = IncidentService(db, index)
         log.info("restored %d open incidents into the clustering index", await incidents.restore())
-        triage = Triage(pipeline, geocoder, await load_embedder(cfg), incidents, hub)
+        alerts = AlertService(
+            db, incidents, broadcaster, build_sender(cfg, http), cfg.alert_contacts, cfg.alert_ack_timeout_s
+        )
+        log.info("resumed %d alert escalation timers", await alerts.restore())
+        triage = Triage(pipeline, geocoder, await load_embedder(cfg), incidents, alerts, broadcaster)
         worker = PipelineWorker(
             triage.place,
             triage.commit,
@@ -98,7 +114,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             cfg.ingest_batch_wait_ms / 1000,
             cfg.decide_concurrency,
         )
-        tasks = [asyncio.create_task(worker.run(), name="pipeline-worker")]
+        tasks = [
+            asyncio.create_task(worker.run(), name="pipeline-worker"),
+            asyncio.create_task(triage.run_revisions(), name="llm-revisions"),
+            asyncio.create_task(broadcaster.run(), name="broadcaster"),
+            asyncio.create_task(alerts.run(), name="alert-escalation"),
+        ]
         if llm is not None:
             tasks.append(asyncio.create_task(llm.run(), name="llm-batcher"))
         app.state.settings = cfg
@@ -109,6 +130,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.worker = worker
         app.state.incidents = incidents
         app.state.geocoder = geocoder
+        app.state.broadcaster = broadcaster
+        app.state.alerts = alerts
+        app.state.triage = triage
         try:
             yield
         finally:
@@ -137,6 +161,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         llm = app.state.llm
         return {
             "reports_decided": app.state.worker.processed,
+            "reports_revised": app.state.triage.revised,
+            "broadcast": {"published": app.state.broadcaster.published, "flushes": app.state.broadcaster.flushes},
             "llm": llm.stats.as_dict() if llm is not None else None,
             "llm_chain": [s.provider.name for s in llm.chain.slots] if llm is not None else [],
             "geocoder_network_calls": app.state.geocoder.network_calls,
@@ -144,5 +170,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(reports.router)
     app.include_router(incidents_api.router)
+    app.include_router(incidents_api.alerts_router)
     app.include_router(ws.router)
     return app

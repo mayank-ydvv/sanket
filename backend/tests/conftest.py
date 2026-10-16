@@ -1,3 +1,5 @@
+import weakref
+from collections import deque
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -53,10 +55,21 @@ def client(settings: Settings) -> Iterator[TestClient]:
         yield test_client
 
 
+_BUFFERS: "weakref.WeakKeyDictionary[Any, deque[dict[str, Any]]]" = weakref.WeakKeyDictionary()
+
+
 def receive_event(ws: Any, event_type: str, limit: int = 20) -> dict[str, Any]:
-    """Next WebSocket event of ``event_type``, skipping others (bounded, so tests cannot hang)."""
+    """Next event of ``event_type`` from the batched stream, skipping others.
+
+    Events that arrive in the same batch are buffered per socket, so two reports
+    coalesced into one message are both seen.
+    """
+    buffer = _BUFFERS.setdefault(ws, deque())
     for _ in range(limit):
-        event: dict[str, Any] = ws.receive_json()
-        if event["type"] == event_type:
-            return event
+        while buffer:
+            event = buffer.popleft()
+            if event["type"] == event_type:
+                return event
+        message: dict[str, Any] = ws.receive_json()
+        buffer.extend(message["data"] if message["type"] == "batch" else [message])
     raise AssertionError(f"no {event_type} event in {limit} messages")
