@@ -9,7 +9,11 @@ import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app import ws
+from app import incidents_api, ws
+from app.cluster.embed import Embedder, HashingEmbedder, SentenceEmbedder
+from app.cluster.geocode import Geocoder, GeocoderConfig
+from app.cluster.index import IncidentIndex
+from app.cluster.service import IncidentService
 from app.config import Settings, get_settings
 from app.db import Database
 from app.decision.factory import build_llm_decider
@@ -17,6 +21,7 @@ from app.decision.local import LocalClassifier
 from app.decision.pipeline import DecisionPipeline
 from app.decision.rules import PrankTracker, SafetyRules
 from app.intake import reports
+from app.triage import Triage
 from app.worker import PipelineWorker
 
 log = logging.getLogger(__name__)
@@ -31,6 +36,19 @@ async def load_local_classifier(settings: Settings) -> LocalClassifier | None:
     classifier = await asyncio.to_thread(LocalClassifier.load, path)
     log.info("loaded local classifier %s", classifier.model.version)
     return classifier
+
+
+async def load_embedder(settings: Settings) -> Embedder:
+    """Multilingual sentence model, or the lexical hashing fallback if it cannot load."""
+    if settings.embedding_backend == "sentence":
+        try:
+            embedder = await asyncio.to_thread(SentenceEmbedder, settings.embedding_model)
+        except Exception:
+            log.exception("embedding model failed to load; falling back to hashed n-grams")
+        else:
+            log.info("loaded embedding model %s", settings.embedding_model)
+            return embedder
+    return HashingEmbedder()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -50,10 +68,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             log.info("LLM chain: %s", " -> ".join(s.provider.name for s in llm.chain.slots))
         rules = SafetyRules(PrankTracker(cfg.prank_window_s, cfg.prank_min_reports))
         pipeline = DecisionPipeline(await load_local_classifier(cfg), llm, rules, cfg.conf_threshold)
-        worker = PipelineWorker(
+        geocoder = Geocoder(
+            http,
             db,
-            hub,
-            pipeline.decide_batch,
+            GeocoderConfig(
+                url=cfg.nominatim_url,
+                user_agent=cfg.nominatim_user_agent,
+                district=cfg.geo_district,
+                viewbox=cfg.geo_viewbox,
+                max_wait_s=cfg.geocode_max_wait_s,
+                network=cfg.geocode_network,
+            ),
+        )
+        index = IncidentIndex(
+            center_lat=cfg.geo_center[0],
+            radius_km=cfg.cluster_radius_km,
+            window_s=cfg.cluster_window_s,
+            similarity=cfg.cluster_similarity,
+            department_bonus=cfg.cluster_department_bonus,
+            unlocated_k=cfg.cluster_unlocated_candidates,
+        )
+        incidents = IncidentService(db, index)
+        log.info("restored %d open incidents into the clustering index", await incidents.restore())
+        triage = Triage(pipeline, geocoder, await load_embedder(cfg), incidents, hub)
+        worker = PipelineWorker(
+            triage.place,
+            triage.commit,
             cfg.ingest_batch_size,
             cfg.ingest_batch_wait_ms / 1000,
             cfg.decide_concurrency,
@@ -67,6 +107,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.http = http
         app.state.hub = hub
         app.state.worker = worker
+        app.state.incidents = incidents
+        app.state.geocoder = geocoder
         try:
             yield
         finally:
@@ -97,8 +139,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "reports_decided": app.state.worker.processed,
             "llm": llm.stats.as_dict() if llm is not None else None,
             "llm_chain": [s.provider.name for s in llm.chain.slots] if llm is not None else [],
+            "geocoder_network_calls": app.state.geocoder.network_calls,
         }
 
     app.include_router(reports.router)
+    app.include_router(incidents_api.router)
     app.include_router(ws.router)
     return app

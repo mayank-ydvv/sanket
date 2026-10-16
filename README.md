@@ -62,3 +62,33 @@ Every report: **local classifier → fast LLM (only if local confidence < 0.8) �
 
 Score a running server against 100 held-out test reports:
 `cd backend && .venv/bin/python -m scripts.post_reports --n 100`
+
+## Geocoding and incident clustering
+
+- **Location**: the LLM's `location_text`, else a regex/gazetteer extractor ("Sector N",
+  known landmarks, Devanagari/Bengali/Tamil digits). Geocoding goes gazetteer → in-memory
+  LRU → SQLite `geocode_cache` (misses cached too) → Nominatim, behind one global 1 req/s
+  limiter, bounded to the district viewbox, with a custom User-Agent. If the limiter queue
+  is too long the report stays "location unconfirmed" instead of stalling triage.
+- **Index** (`app/cluster/index.py`): open incidents updated in the last 30 min, bucketed in
+  ~1 km grid cells. A located report checks its cell + 8 neighbours, then a ≤ 1 km haversine
+  test; an unlocated report checks the 50 most recent incidents of its department. Candidates
+  are scored with one matrix-vector product over unit centroids + a department bonus.
+  Centroids are running sums (renormalised), expiry is a lazy min-heap. Measured: 5.6 µs per
+  lookup at 200 open incidents vs 7.4 µs at 20,000 (constant density).
+- **Embeddings**: multilingual MiniLM over `"<department> <hazards>: <text>"`. The canonical
+  English tags matter: raw MiniLM scores the same event in Hinglish vs English at ~0.48,
+  so untagged text fragmented a 500-report surge into 39–51 incidents; tagged, it gives 13–16.
+- **Twin merge**: after a join moves a centroid or location, the incident is re-matched; an
+  incident it now matches (typically one started by an unlocated report) is merged into
+  the larger one and audited. Dispatchers can split any report back out
+  (`POST /incidents/{id}/split`).
+- **Severity**: max report severity, +1 (cap 5) past 10 reports or when a report mentions
+  children, trapped people or spreading fire.
+- **Acceptance**: 500 multilingual reports about 12 events → 13, 13 and 14 incidents on three
+  seeds (`tests/test_incidents.py`), ~3 s each including embeddings. The default join
+  threshold is 0.70 (+0.15 department bonus): at 0.75 one seed produced 15.
+
+Known limit: a report with no usable location can only be matched by department and text,
+so when several same-department events are open at once (~7–9% of surge reports in tests)
+it may join the wrong one. These incidents are marked "location unconfirmed" for callback.

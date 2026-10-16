@@ -48,6 +48,15 @@ LIFE_SAFETY = _compile(
     ),
 )
 
+# Details that escalate a whole incident (report: children, trapped people, fire spreading).
+ESCALATION = _compile(
+    latin=(
+        r"trapped", r"stuck inside", r"child(?:ren)?", r"kids?", r"baby", r"spreading",
+        r"phans[ea]?", r"phas[ai]", r"bach+h?(?:a|i|e)", r"fail rahi",
+    ),
+    indic=("फंस", "फँस", "बच्च", "फैल", "சிக்கி", "குழந்தை", "பரவு", "আটকে", "বাচ্চা", "শিশু", "ছড়া"),
+)
+
 COERCED_SPEECH = _compile(
     latin=(
         r"can'?t talk", r"cannot talk", r"can'?t speak", r"cannot speak", r"bol nahi sakt[ai]",

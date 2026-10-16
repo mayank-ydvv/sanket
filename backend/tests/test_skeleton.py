@@ -9,7 +9,7 @@ from app.config import Settings
 from app.db import Database
 from app.models import Decision
 from app.privacy import hash_caller
-from tests.conftest import TEST_SALT
+from tests.conftest import TEST_SALT, receive_event
 
 EXPECTED_TABLES = {"reports", "incidents", "alerts", "audit_log", "geocode_cache"}
 
@@ -37,7 +37,7 @@ def test_report_is_broadcast_over_websocket(client: TestClient) -> None:
             json={"text": "aag lagi hai sector 18", "channel": "sms", "caller": "+91 99999 99999"},
         )
         assert response.status_code == 202
-        event = ws.receive_json()
+        event = receive_event(ws, "report.created")
     assert event["type"] == "report.created"
     data = event["data"]
     assert data["id"] == response.json()["id"]
@@ -49,7 +49,7 @@ def test_report_is_broadcast_over_websocket(client: TestClient) -> None:
 def test_raw_caller_number_is_never_stored(client: TestClient, settings: Settings) -> None:
     with client.websocket_connect("/ws") as ws:
         client.post("/reports", json={"text": "help", "caller": "+919876543210"})
-        ws.receive_json()
+        receive_event(ws, "report.created")
     dump = "\n".join(sqlite3.connect(settings.db_path).iterdump())
     assert "9876543210" not in dump
 
@@ -57,7 +57,7 @@ def test_raw_caller_number_is_never_stored(client: TestClient, settings: Setting
 def test_list_reports_returns_decided_report(client: TestClient) -> None:
     with client.websocket_connect("/ws") as ws:
         client.post("/reports", json={"text": "accident on expressway"})
-        ws.receive_json()
+        receive_event(ws, "report.created")
     reports = client.get("/reports").json()
     assert [r["raw_text"] for r in reports] == ["accident on expressway"]
     assert reports[0]["source"] == "local"
@@ -86,7 +86,7 @@ def test_decision_schema_is_strict() -> None:
 def test_decision_is_audited(client: TestClient, settings: Settings) -> None:
     with client.websocket_connect("/ws") as ws:
         report_id = client.post("/reports", json={"text": "1111 1111 1111"}).json()["id"]
-        data = ws.receive_json()["data"]
+        data = receive_event(ws, "report.created")["data"]
     assert data["decision"]["silent_sos"] and data["lane"] == "review"
     assert data["flags"] == ["silent_sos:tap_code"] and data["source"] == "rules"
     row = sqlite3.connect(settings.db_path).execute(

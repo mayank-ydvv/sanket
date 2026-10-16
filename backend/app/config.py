@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -24,6 +25,26 @@ class Settings(BaseSettings):
 
     # Confidence gates (see README: auto-dispatch / one-click confirm / human review).
     conf_threshold: float = Field(0.8, ge=0.0, le=1.0)
+
+    # Geocoding (demo district: Noida). Viewbox is west, south, east, north.
+    geo_district: str = "Noida, Uttar Pradesh"
+    geo_center: tuple[float, float] = (28.5355, 77.3910)
+    geo_viewbox: tuple[float, float, float, float] = (77.25, 28.43, 77.55, 28.70)
+    nominatim_url: str = "https://nominatim.openstreetmap.org/search"
+    nominatim_user_agent: str = "Sanket-triage-demo/0.1 (hackathon prototype)"
+    geocode_network: bool = True
+    geocode_max_wait_s: float = Field(3.0, ge=0)
+
+    # Clustering
+    embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    # "sentence" (multilingual MiniLM) or "hashing" (model-free lexical fallback).
+    embedding_backend: Literal["sentence", "hashing"] = "sentence"
+    # 0.70 + 0.15 department bonus measured best on the 500-report surge (12 ± 2 incidents).
+    cluster_similarity: float = Field(0.70, ge=0.0, le=1.0)
+    cluster_department_bonus: float = Field(0.15, ge=0.0)
+    cluster_radius_km: float = Field(1.0, gt=0)
+    cluster_window_s: float = Field(1800.0, gt=0)
+    cluster_unlocated_candidates: int = Field(50, ge=1)
 
     # Rules
     prank_window_s: float = Field(600.0, gt=0)

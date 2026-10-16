@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -41,6 +42,8 @@ def settings(tmp_path: Path) -> Settings:
         db_path=tmp_path / "test.db",
         local_model_path=tmp_path / "missing.joblib",
         ingest_batch_wait_ms=10,
+        embedding_backend="hashing",
+        geocode_network=False,
     )
 
 
@@ -48,3 +51,12 @@ def settings(tmp_path: Path) -> Settings:
 def client(settings: Settings) -> Iterator[TestClient]:
     with TestClient(create_app(settings)) as test_client:
         yield test_client
+
+
+def receive_event(ws: Any, event_type: str, limit: int = 20) -> dict[str, Any]:
+    """Next WebSocket event of ``event_type``, skipping others (bounded, so tests cannot hang)."""
+    for _ in range(limit):
+        event: dict[str, Any] = ws.receive_json()
+        if event["type"] == event_type:
+            return event
+    raise AssertionError(f"no {event_type} event in {limit} messages")

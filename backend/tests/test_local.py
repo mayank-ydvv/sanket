@@ -7,6 +7,7 @@ from app.config import Settings
 from app.decision.local import LocalClassifier
 from app.main import create_app
 from scripts.dataset import TEST_PATH, load
+from tests.conftest import receive_event
 
 EASY = [
     ("Sector 18 pe building mein aag lagi hai, dhuaan nikal raha", "fire"),
@@ -52,6 +53,6 @@ def test_app_uses_local_model(settings: Settings, model_path: Path) -> None:
     app = create_app(settings.model_copy(update={"local_model_path": model_path}))
     with TestClient(app) as client, client.websocket_connect("/ws") as ws:
         client.post("/reports", json={"text": EASY[0][0], "channel": "sms"})
-        data = ws.receive_json()["data"]
+        data = receive_event(ws, "report.created")["data"]
     assert data["source"] == "local"
     assert data["decision"]["department"] == "fire"

@@ -89,8 +89,47 @@ class Report(BaseModel):
     incident_id: str | None = None
     flags: list[str] = Field(default_factory=list)
     source: DecisionSource | None = None
+    location_text: str | None = None
+    lat: float | None = None
+    lng: float | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def lane(self) -> Lane | None:
         return self.decision.lane if self.decision else None
+
+
+IncidentStatus = Literal["open", "dispatched", "resolved", "merged"]
+
+
+class Incident(BaseModel):
+    """A cluster of reports about one event, as stored and broadcast."""
+
+    id: str
+    title: str
+    department: Department
+    severity: int = Field(ge=1, le=5)
+    status: IncidentStatus
+    lat: float | None
+    lng: float | None
+    location_text: str | None
+    location_confirmed: bool
+    report_count: int
+    first_seen: float
+    last_updated: float
+    linked_hazards: list[str] = Field(default_factory=list)
+    briefing: list[str] | None = None
+
+
+class AuditEntry(BaseModel):
+    action: str
+    actor: str
+    before: str | None
+    after: str | None
+    at: float
+
+
+class IncidentDetail(BaseModel):
+    incident: Incident
+    reports: list[Report]
+    audit: list[AuditEntry]

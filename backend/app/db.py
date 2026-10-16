@@ -1,15 +1,17 @@
 """SQLite storage via aiosqlite (WAL mode). The schema uses only Postgres-portable types."""
 
+import asyncio
+import contextlib
 import json
 import sqlite3
 import time
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
-from typing import Self
+from typing import Any, Self
 
 import aiosqlite
 
-from app.models import Decision, DecisionResult, Report
+from app.models import AuditEntry, Decision, DecisionResult, Incident, Report
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS incidents (
@@ -76,9 +78,21 @@ CREATE INDEX IF NOT EXISTS idx_alerts_incident ON alerts(incident_id);
 CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity, entity_id);
 """
 
+# Columns added after the first schema; applied idempotently with ALTER TABLE.
+ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("reports", "location_text", "TEXT"),
+    ("reports", "lat", "REAL"),
+    ("reports", "lng", "REAL"),
+    ("reports", "embedding", "BLOB"),
+)
+
 _REPORT_COLUMNS = (
     "id, channel, caller_hash, raw_text, language, english_gloss, received_at, "
-    "decision_json, confidence, incident_id, flags, source"
+    "decision_json, confidence, incident_id, flags, source, location_text, lat, lng"
+)
+_INCIDENT_COLUMNS = (
+    "id, title, department, severity, status, lat, lng, location_text, location_confirmed, "
+    "report_count, first_seen, last_updated, linked_hazards, briefing"
 )
 
 
@@ -97,14 +111,42 @@ def _row_to_report(row: sqlite3.Row) -> Report:
         incident_id=row["incident_id"],
         flags=json.loads(row["flags"]) if row["flags"] else [],
         source=row["source"],
+        location_text=row["location_text"],
+        lat=row["lat"],
+        lng=row["lng"],
+    )
+
+
+def _row_to_incident(row: sqlite3.Row) -> Incident:
+    return Incident(
+        id=row["id"],
+        title=row["title"],
+        department=row["department"],
+        severity=row["severity"],
+        status=row["status"],
+        lat=row["lat"],
+        lng=row["lng"],
+        location_text=row["location_text"],
+        location_confirmed=bool(row["location_confirmed"]),
+        report_count=row["report_count"],
+        first_seen=row["first_seen"],
+        last_updated=row["last_updated"],
+        linked_hazards=json.loads(row["linked_hazards"]) if row["linked_hazards"] else [],
+        briefing=json.loads(row["briefing"]) if row["briefing"] else None,
     )
 
 
 class Database:
-    """Thin async wrapper over one aiosqlite connection (SQLite serialises writes anyway)."""
+    """Async wrapper over one aiosqlite connection.
+
+    Write methods do not commit: call them inside ``async with db.transaction()``,
+    which serialises writers with a lock and commits once at the end, so a batch
+    of reports and incidents lands atomically.
+    """
 
     def __init__(self, conn: aiosqlite.Connection) -> None:
         self._conn = conn
+        self._write_lock = asyncio.Lock()
 
     @classmethod
     async def open(cls, path: Path) -> Self:
@@ -116,14 +158,31 @@ class Database:
         await conn.execute("PRAGMA synchronous=NORMAL")
         await conn.execute("PRAGMA foreign_keys=ON")
         await conn.executescript(SCHEMA)
+        for table, column, kind in ADDED_COLUMNS:
+            async with conn.execute(f"PRAGMA table_info({table})") as cursor:
+                existing = {row["name"] for row in await cursor.fetchall()}
+            if column not in existing:
+                await conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
         await conn.commit()
         return cls(conn)
 
     async def close(self) -> None:
         await self._conn.close()
 
+    @contextlib.asynccontextmanager
+    async def transaction(self) -> AsyncIterator[None]:
+        async with self._write_lock:
+            try:
+                yield
+            except BaseException:
+                await self._conn.rollback()
+                raise
+            await self._conn.commit()
+
+    # -- writes (inside a transaction) -----------------------------------------
+
     async def insert_report(self, report: Report) -> None:
-        """Insert a freshly received report (no decision yet). O(log n) index insert."""
+        """Insert a freshly received report (no decision yet). O(log n)."""
         await self._conn.execute(
             "INSERT INTO reports (id, channel, caller_hash, raw_text, language, received_at, flags) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -137,10 +196,9 @@ class Database:
                 json.dumps(report.flags),
             ),
         )
-        await self._conn.commit()
 
     async def save_decisions(self, items: Sequence[tuple[str, DecisionResult]]) -> None:
-        """Store a batch of decisions and their audit rows in one transaction. O(b log n)."""
+        """Store a batch of decisions plus one audit row each. O(b log n)."""
         now = time.time()
         await self._conn.executemany(
             "UPDATE reports SET decision_json = ?, confidence = ?, source = ?, flags = ? WHERE id = ?",
@@ -155,38 +213,154 @@ class Database:
                 for report_id, result in items
             ],
         )
-        await self._conn.executemany(
-            "INSERT INTO audit_log (entity, entity_id, action, actor, before, after, at) "
-            "VALUES ('report', ?, 'decided', ?, NULL, ?, ?)",
+        await self.audit(
             [
                 (
+                    "report",
                     report_id,
+                    "decided",
                     result.model,
-                    result.model_dump_json(include={"decision", "source", "confidence", "prompt_version", "rules_fired"}),
-                    now,
+                    None,
+                    result.model_dump_json(
+                        include={"decision", "source", "confidence", "prompt_version", "rules_fired"}
+                    ),
                 )
                 for report_id, result in items
             ],
+            at=now,
         )
-        await self._conn.commit()
 
-    async def audit_for(self, entity: str, entity_id: str) -> list[dict[str, object]]:
-        """Audit trail of one entity, oldest first. O(log n + k) via idx_audit_entity."""
-        async with self._conn.execute(
-            "SELECT action, actor, before, after, at FROM audit_log WHERE entity = ? AND entity_id = ? ORDER BY id",
-            (entity, entity_id),
-        ) as cursor:
-            return [dict(row) for row in await cursor.fetchall()]
+    async def save_report_placement(
+        self,
+        rows: Sequence[tuple[str | None, str | None, float | None, float | None, bytes | None, str]],
+    ) -> None:
+        """(incident_id, location_text, lat, lng, embedding, report_id) per report. O(b log n)."""
+        await self._conn.executemany(
+            "UPDATE reports SET incident_id = ?, location_text = ?, lat = ?, lng = ?, embedding = ? "
+            "WHERE id = ?",
+            rows,
+        )
+
+    async def move_reports(self, from_incident: str, to_incident: str) -> None:
+        await self._conn.execute(
+            "UPDATE reports SET incident_id = ? WHERE incident_id = ?", (to_incident, from_incident)
+        )
+
+    async def set_report_incident(self, report_id: str, incident_id: str) -> None:
+        await self._conn.execute("UPDATE reports SET incident_id = ? WHERE id = ?", (incident_id, report_id))
+
+    async def upsert_incidents(self, rows: Sequence[tuple[Incident, bytes | None]]) -> None:
+        """Insert or update incidents with their unit centroid. O(b log n)."""
+        await self._conn.executemany(
+            f"INSERT INTO incidents ({_INCIDENT_COLUMNS}, centroid) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET title = excluded.title, department = excluded.department, "
+            "severity = excluded.severity, status = excluded.status, lat = excluded.lat, "
+            "lng = excluded.lng, location_text = excluded.location_text, "
+            "location_confirmed = excluded.location_confirmed, report_count = excluded.report_count, "
+            "last_updated = excluded.last_updated, linked_hazards = excluded.linked_hazards, "
+            "briefing = excluded.briefing, centroid = COALESCE(excluded.centroid, incidents.centroid)",
+            [
+                (
+                    i.id,
+                    i.title,
+                    i.department,
+                    i.severity,
+                    i.status,
+                    i.lat,
+                    i.lng,
+                    i.location_text,
+                    int(i.location_confirmed),
+                    i.report_count,
+                    i.first_seen,
+                    i.last_updated,
+                    json.dumps(i.linked_hazards),
+                    json.dumps(i.briefing) if i.briefing is not None else None,
+                    centroid,
+                )
+                for i, centroid in rows
+            ],
+        )
+
+    async def audit(
+        self, rows: Sequence[tuple[str, str, str, str, str | None, str | None]], at: float | None = None
+    ) -> None:
+        """Append (entity, entity_id, action, actor, before, after) rows. O(b)."""
+        when = time.time() if at is None else at
+        await self._conn.executemany(
+            "INSERT INTO audit_log (entity, entity_id, action, actor, before, after, at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [(*row, when) for row in rows],
+        )
+
+    async def geocode_cache_put(self, query: str, lat: float | None, lng: float | None) -> None:
+        await self._conn.execute(
+            "INSERT OR REPLACE INTO geocode_cache (query, lat, lng, at) VALUES (?, ?, ?, ?)",
+            (query, lat, lng, time.time()),
+        )
+
+    # -- reads ----------------------------------------------------------------
+
+    async def _fetch(self, sql: str, params: Sequence[Any] = ()) -> list[sqlite3.Row]:
+        async with self._conn.execute(sql, params) as cursor:
+            return list(await cursor.fetchall())
 
     async def recent_reports(self, limit: int) -> list[Report]:
         """Newest ``limit`` reports. O(log n + limit) via the received_at index."""
-        async with self._conn.execute(
+        rows = await self._fetch(
             f"SELECT {_REPORT_COLUMNS} FROM reports ORDER BY received_at DESC LIMIT ?", (limit,)
-        ) as cursor:
-            return [_row_to_report(row) for row in await cursor.fetchall()]
+        )
+        return [_row_to_report(row) for row in rows]
+
+    async def report(self, report_id: str) -> tuple[Report, bytes | None] | None:
+        rows = await self._fetch(f"SELECT {_REPORT_COLUMNS}, embedding FROM reports WHERE id = ?", (report_id,))
+        return (_row_to_report(rows[0]), rows[0]["embedding"]) if rows else None
+
+    async def incident_reports(self, incident_id: str) -> list[tuple[Report, bytes | None]]:
+        """Reports of one incident with embeddings, oldest first. O(log n + r)."""
+        rows = await self._fetch(
+            f"SELECT {_REPORT_COLUMNS}, embedding FROM reports WHERE incident_id = ? ORDER BY received_at",
+            (incident_id,),
+        )
+        return [(_row_to_report(row), row["embedding"]) for row in rows]
+
+    async def incident(self, incident_id: str) -> Incident | None:
+        rows = await self._fetch(f"SELECT {_INCIDENT_COLUMNS} FROM incidents WHERE id = ?", (incident_id,))
+        return _row_to_incident(rows[0]) if rows else None
+
+    async def incidents(self, status: str | None, limit: int) -> list[Incident]:
+        """Ranked by severity, then longest waiting. O(log n + limit) on the status index."""
+        where, params = ("WHERE status = ?", [status]) if status else ("", [])
+        rows = await self._fetch(
+            f"SELECT {_INCIDENT_COLUMNS} FROM incidents {where} "
+            "ORDER BY severity DESC, first_seen ASC LIMIT ?",
+            [*params, limit],
+        )
+        return [_row_to_incident(row) for row in rows]
+
+    async def open_incidents_since(self, since: float) -> list[tuple[Incident, bytes | None]]:
+        """Open incidents updated after ``since`` with centroids (index restore)."""
+        rows = await self._fetch(
+            f"SELECT {_INCIDENT_COLUMNS}, centroid FROM incidents "
+            "WHERE status = 'open' AND last_updated >= ?",
+            (since,),
+        )
+        return [(_row_to_incident(row), row["centroid"]) for row in rows]
+
+    async def audit_for(self, entity: str, entity_id: str) -> list[AuditEntry]:
+        """Audit trail of one entity, oldest first. O(log n + k) via idx_audit_entity."""
+        rows = await self._fetch(
+            "SELECT action, actor, before, after, at FROM audit_log "
+            "WHERE entity = ? AND entity_id = ? ORDER BY id",
+            (entity, entity_id),
+        )
+        return [AuditEntry(**dict(row)) for row in rows]
+
+    async def geocode_cache_get(self, query: str) -> tuple[float | None, float | None] | None:
+        """Cached (lat, lng) for a normalised query; (None, None) is a cached miss. O(log n)."""
+        rows = await self._fetch("SELECT lat, lng FROM geocode_cache WHERE query = ?", (query,))
+        return (rows[0]["lat"], rows[0]["lng"]) if rows else None
 
     async def table_names(self) -> list[str]:
-        async with self._conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
-        ) as cursor:
-            return [row["name"] for row in await cursor.fetchall()]
+        rows = await self._fetch("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+        return [row["name"] for row in rows]

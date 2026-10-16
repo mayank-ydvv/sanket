@@ -2,6 +2,7 @@
 
 from fastapi import Request
 
+from app.cluster.service import IncidentService
 from app.config import Settings
 from app.db import Database
 from app.worker import PipelineWorker
@@ -17,6 +18,11 @@ def get_db(request: Request) -> Database:
     return db
 
 
-def get_worker(request: Request) -> PipelineWorker:
-    worker: PipelineWorker = request.app.state.worker
+def get_worker(request: Request) -> PipelineWorker[object]:
+    worker: PipelineWorker[object] = request.app.state.worker
     return worker
+
+
+def get_incidents(request: Request) -> IncidentService:
+    incidents: IncidentService = request.app.state.incidents
+    return incidents

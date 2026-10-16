@@ -1,43 +1,40 @@
 """Ingest worker: two stages connected by a queue.
 
-Stage 1 (concurrent, bounded): micro-batches from the ingest queue are decided in
-parallel, so a batch waiting on the LLM never blocks the next batch's local pass.
-Stage 2 (single consumer): persists decisions, writes the audit trail and
-broadcasts. Being the only writer of downstream state, it needs no locks.
+Stage 1 (concurrent, bounded): micro-batches from the ingest queue are decided,
+located and embedded in parallel, so a batch waiting on the LLM or geocoder never
+blocks the next batch's local pass.
+Stage 2 (single consumer): clusters, persists and broadcasts. Being the only
+writer of incident state, it needs no further coordination.
 """
 
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Sequence
+from typing import Generic, TypeVar
 
-from app.db import Database
-from app.models import DecisionResult, Report
-from app.ws import Hub
+from app.models import Report
 
 log = logging.getLogger(__name__)
 
-DecideFn = Callable[[Sequence[Report]], Awaitable[list[DecisionResult]]]
-Decided = list[tuple[Report, DecisionResult]]
+T = TypeVar("T")
 
 
-class PipelineWorker:
+class PipelineWorker(Generic[T]):
     def __init__(
         self,
-        db: Database,
-        hub: Hub,
-        decide: DecideFn,
+        place: Callable[[Sequence[Report]], Awaitable[list[T]]],
+        commit: Callable[[Sequence[T]], Awaitable[int]],
         batch_size: int,
         batch_wait_s: float,
         concurrency: int = 8,
     ) -> None:
-        self._db = db
-        self._hub = hub
-        self._decide = decide
+        self._place = place
+        self._commit = commit
         self._batch_size = batch_size
         self._batch_wait_s = batch_wait_s
         self._slots = asyncio.Semaphore(concurrency)
         self._ingest: asyncio.Queue[Report] = asyncio.Queue()
-        self._decided: asyncio.Queue[Decided] = asyncio.Queue()
+        self._placed: asyncio.Queue[list[T]] = asyncio.Queue()
         self._tasks: set[asyncio.Task[None]] = set()
         self.processed = 0
 
@@ -52,7 +49,7 @@ class PipelineWorker:
             while True:
                 batch = await self._next_batch()
                 await self._slots.acquire()
-                task = asyncio.create_task(self._decide_batch(batch))
+                task = asyncio.create_task(self._stage_one(batch))
                 self._tasks.add(task)
                 task.add_done_callback(self._tasks.discard)
         finally:
@@ -75,31 +72,18 @@ class PipelineWorker:
                 break
         return batch
 
-    async def _decide_batch(self, batch: list[Report]) -> None:
+    async def _stage_one(self, batch: list[Report]) -> None:
         try:
-            results = await self._decide(batch)
-            self._decided.put_nowait(list(zip(batch, results, strict=True)))
+            self._placed.put_nowait(await self._place(batch))
         except Exception:
-            log.exception("deciding a batch of %d failed", len(batch))
+            log.exception("stage 1 failed for a batch of %d", len(batch))
         finally:
             self._slots.release()
 
     async def _sink(self) -> None:
-        """Single writer: persist + audit + broadcast each decided batch. O(b) per batch."""
         while True:
-            items = await self._decided.get()
+            items = await self._placed.get()
             try:
-                await self._db.save_decisions([(report.id, result) for report, result in items])
-                for report, result in items:
-                    decided = report.model_copy(
-                        update={
-                            "decision": result.decision,
-                            "confidence": result.confidence,
-                            "source": result.source,
-                            "flags": result.rules_fired,
-                        }
-                    )
-                    await self._hub.broadcast("report.created", decided.model_dump(mode="json"))
-                self.processed += len(items)
+                self.processed += await self._commit(items)
             except Exception:
-                log.exception("persisting a batch of %d failed", len(items))
+                log.exception("stage 2 failed for a batch of %d", len(items))

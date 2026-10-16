@@ -26,7 +26,7 @@ async def create_report(
     body: ReportIn,
     settings: Annotated[Settings, Depends(get_settings_dep)],
     db: Annotated[Database, Depends(get_db)],
-    worker: Annotated[PipelineWorker, Depends(get_worker)],
+    worker: Annotated[PipelineWorker[object], Depends(get_worker)],
 ) -> Accepted:
     """Persist the raw report, queue it for triage and return at once. O(L)."""
     report = Report(
@@ -36,7 +36,8 @@ async def create_report(
         raw_text=body.text,
         received_at=time.time(),
     )
-    await db.insert_report(report)
+    async with db.transaction():
+        await db.insert_report(report)
     worker.submit(report)
     return Accepted(id=report.id)
 
