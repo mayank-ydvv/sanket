@@ -38,7 +38,7 @@ GAZETTEER: tuple[Place, ...] = (
 )
 
 _DIGITS = str.maketrans("०१२३४५६७८९০১২৩৪৫৬৭৮৯௦௧௨௩௪௫௬௭௮௯", "0123456789" * 3)
-_SECTOR_WORDS = re.compile(r"सेक्टर|सैक्टर|সেক্টর|செக்டர்|sec(?:tor|\.)?(?=\s*\d)", re.IGNORECASE)
+_SECTOR_WORDS = re.compile(r"सेक्टर|सैक्टर|सेक्तर|सेक्तर|সেক্টর|செக்டர்|sec(?:tor|\.)?(?=\s*\d)", re.IGNORECASE)
 # Keep Indic letters *and* their combining vowel signs (U+0900–U+0DFF), which \w alone drops.
 _PUNCT = re.compile(r"[^\w\s\u0900-\u0DFF]")
 _SPACES = re.compile(r"\s+")

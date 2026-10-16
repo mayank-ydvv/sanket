@@ -22,7 +22,9 @@ from app.decision.factory import build_llm_decider
 from app.decision.local import LocalClassifier
 from app.decision.pipeline import DecisionPipeline
 from app.decision.rules import PrankTracker, SafetyRules
-from app.intake import reports
+from app.intake import reports, twilio
+from app.intake.service import Intake
+from app.stt.transcribe import GroqWhisper, SarvamSTT, SpeechToText, STTChain
 from app.triage import Triage
 from app.worker import PipelineWorker
 
@@ -62,15 +64,24 @@ def build_sender(settings: Settings, http: httpx.AsyncClient) -> AlertSender:
     return MockSender()
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
-    """Build the app. Tests pass their own settings (temp DB, fixed salt)."""
+def build_stt(settings: Settings, http: httpx.AsyncClient) -> STTChain:
+    providers: list[SpeechToText] = []
+    if settings.groq_api_key:
+        providers.append(GroqWhisper(http, settings.groq_api_key, settings.groq_stt_model))
+    if settings.sarvam_api_key:
+        providers.append(SarvamSTT(http, settings.sarvam_api_key, settings.sarvam_stt_model))
+    return STTChain(providers)
+
+
+def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
+    """Build the app. Tests pass their own settings and, optionally, a mock HTTP transport."""
     cfg = settings or get_settings()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         db = await Database.open(cfg.db_path)
-        http = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
+        http = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0), transport=transport)
         hub = ws.Hub()
         broadcaster = ws.Broadcaster(hub)
         llm = build_llm_decider(cfg, http)
@@ -133,12 +144,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.broadcaster = broadcaster
         app.state.alerts = alerts
         app.state.triage = triage
+        app.state.intake = Intake(db, worker, cfg.caller_salt)
+        app.state.stt = build_stt(cfg, http)
+        app.state.voice_tasks = set()
         try:
             yield
         finally:
-            for task in tasks:
+            for task in [*tasks, *app.state.voice_tasks]:
                 task.cancel()
-            for task in tasks:
+            for task in [*tasks, *app.state.voice_tasks]:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
             await http.aclose()
@@ -169,6 +183,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     app.include_router(reports.router)
+    app.include_router(twilio.router)
     app.include_router(incidents_api.router)
     app.include_router(incidents_api.alerts_router)
     app.include_router(ws.router)

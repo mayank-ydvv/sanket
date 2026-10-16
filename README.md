@@ -116,3 +116,40 @@ it may join the wrong one. These incidents are marked "location unconfirmed" for
   loop over a min-heap of deadlines escalates anything unacknowledged after 90 s to the next
   contact; timers resume after a restart. Every alert, ack, escalation and override is audited.
 - **Endpoints**: `POST /incidents/{id}/confirm | /ack | /override | /split`, `GET /alerts`.
+
+## Voice and SMS intake (Twilio)
+
+- `POST /twilio/voice` answers with a Hindi + English prompt and records up to 60 s. If the
+  caller says nothing, the call is reported with empty text, which the rules treat as a
+  silent SOS (police, human review).
+- `POST /twilio/recording` replies to Twilio immediately, then in the background downloads
+  the MP3, transcribes it (Groq `whisper-large-v3`, ~0.6 s for a 10 s clip; Sarvam `saaras:v3`
+  fallback for clips ≤ 30 s), and submits it as a `call` report with the detected language.
+  A recording that cannot be transcribed is still submitted, so it reaches a human.
+- `POST /twilio/sms` goes straight into the pipeline (the offline / no-data channel).
+- Every webhook checks `X-Twilio-Signature` (HMAC-SHA1 over `PUBLIC_BASE_URL` + sorted
+  params; verified against Twilio's documented example).
+
+### Setup for a live call
+
+1. **Twilio trial**: sign up at twilio.com (free trial credit). In the console, get a trial
+   phone number with Voice + SMS. Copy the Account SID and Auth Token.
+2. **Verify the demo phones**: Console → Phone Numbers → Verified Caller IDs. Trial accounts
+   only send SMS/calls *to* verified numbers, and callers hear a short trial message first.
+3. **Tunnel**: `brew install cloudflared`, then run
+   `cloudflared tunnel --url http://localhost:8010` and copy the `https://….trycloudflare.com`
+   URL (it changes on every run; an ngrok free static domain avoids that).
+4. **Env** (`sanket/.env`): `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`,
+   `PUBLIC_BASE_URL=<tunnel URL>`; restart the API.
+5. **Webhooks**: on the number, set "A call comes in" → Webhook,
+   `<tunnel>/twilio/voice`, HTTP POST; "A message comes in" → `<tunnel>/twilio/sms`, POST.
+6. **Check**: `cd backend && .venv/bin/python -m scripts.twilio_check` posts a signed test
+   SMS through the tunnel; then call the number.
+7. *(Optional)* real SMS alerts: `MOCK_ALERTS=false` and phone numbers in `ALERT_CONTACTS`
+   (verified numbers only on a trial).
+
+Known limits: a Twilio trial number is usually a US number (Indian numbers need regulatory
+approval), so calling it from an Indian phone is an international call for the caller.
+Spoken numbers are a weak spot: in a test, "सेक्टर बासठ" (sector sixty-two) was transcribed as
+"सेक्तर बासक", so the gazetteer cannot place it and the LLM's location extraction or a
+dispatcher callback has to.

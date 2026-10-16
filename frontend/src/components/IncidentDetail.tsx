@@ -32,6 +32,8 @@ function ReportItem({ report, onSplit, canSplit }: { report: Report; onSplit: ()
       <div className="flex items-center justify-between gap-2 text-[11px] text-mute">
         <span className="font-mono">
           {clock.format(report.received_at * 1000)} · {report.channel}
+          {report.language ? ` · ${report.language}` : ""}
+          {report.language ? ` · ${report.language}` : ""}
         </span>
         {canSplit && (
           <button type="button" onClick={onSplit} className="rounded px-1.5 py-0.5 text-sky-300 hover:bg-sky-500/10">

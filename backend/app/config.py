@@ -48,6 +48,16 @@ class Settings(BaseSettings):
     cluster_window_s: float = Field(1800.0, gt=0)
     cluster_unlocated_candidates: int = Field(50, ge=1)
 
+    # Telephony intake (Twilio webhooks) and speech-to-text.
+    # PUBLIC_BASE_URL is the tunnel URL Twilio calls; signatures are computed over it.
+    public_base_url: str | None = None
+    twilio_validate_signature: bool = True
+    twilio_sms_reply: bool = False
+    voice_max_seconds: int = Field(60, ge=5, le=300)
+    groq_stt_model: str = "whisper-large-v3"
+    sarvam_api_key: str | None = None
+    sarvam_stt_model: str = "saaras:v3"
+
     # Alerts: mock sender unless MOCK_ALERTS=false and Twilio credentials are set.
     mock_alerts: bool = True
     alert_ack_timeout_s: float = Field(90.0, gt=0)

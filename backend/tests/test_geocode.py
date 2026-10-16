@@ -109,6 +109,8 @@ async def test_network_disabled(db: Database) -> None:
     [
         ("aag lagi hai Sector 18 metro ke paas", "Sector 18 metro"),
         ("सेक्टर ६२ में एक्सीडेंट", "Sector 62"),
+        ("सेक्तर 62 में आग", "Sector 62"),  # Whisper spelling of the spoken word
+        ("सेक्तर 62 में आग", "Sector 62"),  # Whisper spelling of the spoken word
         ("Gaur City 2 এ জল ঢুকেছে", "Gaur City 2"),
         ("sec 44 mein chori", "Sector 44"),
         ("help at the old water tank", None),
