@@ -92,6 +92,7 @@ class Report(BaseModel):
     location_text: str | None = None
     lat: float | None = None
     lng: float | None = None
+    refining: bool = False  # true while the fast LLM is re-checking an uncertain decision
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -119,6 +120,42 @@ class Incident(BaseModel):
     last_updated: float
     linked_hazards: list[str] = Field(default_factory=list)
     briefing: list[str] | None = None
+    lane: Lane = "confirm"
+    confidence: float = 0.0
+    silent_sos: bool = False
+    prank_suspected: bool = False
+    needs_review: bool = False
+    overrides: dict[str, str | int] = Field(default_factory=dict)
+
+
+class Contact(BaseModel):
+    """One rung of a department's escalation ladder (station first, supervisor last)."""
+
+    name: str
+    phone: str | None = None
+
+
+class Alert(BaseModel):
+    id: str
+    incident_id: str
+    department: Department
+    channel: str
+    contact: str
+    level: int
+    sent_at: float
+    acknowledged_at: float | None = None
+    escalated_to: str | None = None
+    triggered_by: str
+
+
+class OverrideRequest(BaseModel):
+    """Dispatcher correction; stored in the audit log as a future training label."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    department: Department | None = None
+    severity: int | None = Field(None, ge=1, le=5)
+    note: str | None = Field(None, max_length=500)
 
 
 class AuditEntry(BaseModel):
@@ -133,3 +170,4 @@ class IncidentDetail(BaseModel):
     incident: Incident
     reports: list[Report]
     audit: list[AuditEntry]
+    alerts: list[Alert] = Field(default_factory=list)

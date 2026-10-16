@@ -211,6 +211,12 @@ class IncidentIndex:
         self._touch(inc, self._clock())
         return inc
 
+    def swap_vector(self, incident_id: str, old: Vector, new: Vector) -> None:
+        """Replace one report's contribution to the centroid (LLM revision). O(d)."""
+        inc = self._incidents[incident_id]
+        inc.vector_sum = inc.vector_sum - old + new
+        inc.centroid = _unit(inc.vector_sum)
+
     def remove_report(self, incident_id: str, vector: Vector) -> IndexedIncident | None:
         """Take one report's vector back out (used by split). O(d)."""
         inc = self._incidents.get(incident_id)

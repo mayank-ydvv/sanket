@@ -11,7 +11,7 @@ from typing import Any, Self
 
 import aiosqlite
 
-from app.models import AuditEntry, Decision, DecisionResult, Incident, Report
+from app.models import Alert, AuditEntry, Decision, DecisionResult, Incident, Report
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS incidents (
@@ -84,6 +84,12 @@ ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("reports", "lat", "REAL"),
     ("reports", "lng", "REAL"),
     ("reports", "embedding", "BLOB"),
+    ("incidents", "summary_json", "TEXT"),
+    ("alerts", "contact", "TEXT"),
+    ("alerts", "level", "INTEGER"),
+)
+_SUMMARY_FIELDS = frozenset(
+    {"lane", "confidence", "silent_sos", "prank_suspected", "needs_review", "overrides"}
 )
 
 _REPORT_COLUMNS = (
@@ -92,7 +98,11 @@ _REPORT_COLUMNS = (
 )
 _INCIDENT_COLUMNS = (
     "id, title, department, severity, status, lat, lng, location_text, location_confirmed, "
-    "report_count, first_seen, last_updated, linked_hazards, briefing"
+    "report_count, first_seen, last_updated, linked_hazards, briefing, summary_json"
+)
+_ALERT_COLUMNS = (
+    "id, incident_id, department, channel, contact, level, sent_at, acknowledged_at, "
+    "escalated_to, triggered_by"
 )
 
 
@@ -133,7 +143,12 @@ def _row_to_incident(row: sqlite3.Row) -> Incident:
         last_updated=row["last_updated"],
         linked_hazards=json.loads(row["linked_hazards"]) if row["linked_hazards"] else [],
         briefing=json.loads(row["briefing"]) if row["briefing"] else None,
+        **(json.loads(row["summary_json"]) if row["summary_json"] else {}),
     )
+
+
+def _row_to_alert(row: sqlite3.Row) -> Alert:
+    return Alert(**{key: row[key] for key in row.keys()})
 
 
 class Database:
@@ -197,7 +212,9 @@ class Database:
             ),
         )
 
-    async def save_decisions(self, items: Sequence[tuple[str, DecisionResult]]) -> None:
+    async def save_decisions(
+        self, items: Sequence[tuple[str, DecisionResult]], action: str = "decided"
+    ) -> None:
         """Store a batch of decisions plus one audit row each. O(b log n)."""
         now = time.time()
         await self._conn.executemany(
@@ -218,7 +235,7 @@ class Database:
                 (
                     "report",
                     report_id,
-                    "decided",
+                    action,
                     result.model,
                     None,
                     result.model_dump_json(
@@ -253,13 +270,14 @@ class Database:
         """Insert or update incidents with their unit centroid. O(b log n)."""
         await self._conn.executemany(
             f"INSERT INTO incidents ({_INCIDENT_COLUMNS}, centroid) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(id) DO UPDATE SET title = excluded.title, department = excluded.department, "
             "severity = excluded.severity, status = excluded.status, lat = excluded.lat, "
             "lng = excluded.lng, location_text = excluded.location_text, "
             "location_confirmed = excluded.location_confirmed, report_count = excluded.report_count, "
             "last_updated = excluded.last_updated, linked_hazards = excluded.linked_hazards, "
-            "briefing = excluded.briefing, centroid = COALESCE(excluded.centroid, incidents.centroid)",
+            "briefing = excluded.briefing, summary_json = excluded.summary_json, "
+            "centroid = COALESCE(excluded.centroid, incidents.centroid)",
             [
                 (
                     i.id,
@@ -276,6 +294,7 @@ class Database:
                     i.last_updated,
                     json.dumps(i.linked_hazards),
                     json.dumps(i.briefing) if i.briefing is not None else None,
+                    i.model_dump_json(include=_SUMMARY_FIELDS),
                     centroid,
                 )
                 for i, centroid in rows
@@ -292,6 +311,35 @@ class Database:
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             [(*row, when) for row in rows],
         )
+
+    async def update_report_embedding(self, report_id: str, embedding: bytes) -> None:
+        await self._conn.execute("UPDATE reports SET embedding = ? WHERE id = ?", (embedding, report_id))
+
+    async def update_report_location(
+        self, report_id: str, location_text: str | None, lat: float | None, lng: float | None
+    ) -> None:
+        await self._conn.execute(
+            "UPDATE reports SET location_text = ?, lat = ?, lng = ? WHERE id = ?",
+            (location_text, lat, lng, report_id),
+        )
+
+    async def insert_alert(self, alert: Alert) -> None:
+        await self._conn.execute(
+            f"INSERT INTO alerts ({_ALERT_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                alert.id, alert.incident_id, alert.department, alert.channel, alert.contact,
+                alert.level, alert.sent_at, alert.acknowledged_at, alert.escalated_to, alert.triggered_by,
+            ),
+        )
+
+    async def update_alert(self, alert_id: str, acknowledged_at: float | None, escalated_to: str | None) -> None:
+        await self._conn.execute(
+            "UPDATE alerts SET acknowledged_at = ?, escalated_to = ? WHERE id = ?",
+            (acknowledged_at, escalated_to, alert_id),
+        )
+
+    async def set_incident_status(self, incident_id: str, status: str) -> None:
+        await self._conn.execute("UPDATE incidents SET status = ? WHERE id = ?", (status, incident_id))
 
     async def geocode_cache_put(self, query: str, lat: float | None, lng: float | None) -> None:
         await self._conn.execute(
@@ -346,6 +394,25 @@ class Database:
             (since,),
         )
         return [(_row_to_incident(row), row["centroid"]) for row in rows]
+
+    async def alerts_for(self, incident_id: str) -> list[Alert]:
+        """Alerts of one incident, oldest first. O(log n + k) via idx_alerts_incident."""
+        rows = await self._fetch(
+            f"SELECT {_ALERT_COLUMNS} FROM alerts WHERE incident_id = ? ORDER BY sent_at", (incident_id,)
+        )
+        return [_row_to_alert(row) for row in rows]
+
+    async def recent_alerts(self, limit: int) -> list[Alert]:
+        """Newest alerts first. O(n log n) sort; alert volume is small (one per dispatch)."""
+        rows = await self._fetch(f"SELECT {_ALERT_COLUMNS} FROM alerts ORDER BY sent_at DESC LIMIT ?", (limit,))
+        return [_row_to_alert(row) for row in rows]
+
+    async def unacknowledged_alerts(self) -> list[Alert]:
+        """Live alerts still waiting for an ack (escalation restore). O(a)."""
+        rows = await self._fetch(
+            f"SELECT {_ALERT_COLUMNS} FROM alerts WHERE acknowledged_at IS NULL AND escalated_to IS NULL"
+        )
+        return [_row_to_alert(row) for row in rows]
 
     async def audit_for(self, entity: str, entity_id: str) -> list[AuditEntry]:
         """Audit trail of one entity, oldest first. O(log n + k) via idx_audit_entity."""

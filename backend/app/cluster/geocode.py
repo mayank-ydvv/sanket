@@ -42,6 +42,16 @@ class GeocoderConfig:
     network: bool = True
 
 
+def _plausible(query: str, result: dict[str, object]) -> bool:
+    """Reject fuzzy hits that share no token with the query (e.g. "3rd floor" -> a street).
+
+    A query token counts if it is a number or at least 3 characters long. O(L).
+    """
+    name = normalize(str(result.get("display_name", "")))
+    words = set(name.split())
+    return any((token.isdigit() or len(token) >= 3) and token in words for token in query.split())
+
+
 class Geocoder:
     def __init__(
         self,
@@ -137,6 +147,6 @@ class Geocoder:
         except (httpx.HTTPError, ValueError) as exc:
             log.warning("nominatim lookup failed for %r: %r", query, exc)
             return None, False
-        if not results:
+        if not results or not _plausible(query, results[0]):
             return None, True
         return GeoPoint(float(results[0]["lat"]), float(results[0]["lon"]), "nominatim"), True

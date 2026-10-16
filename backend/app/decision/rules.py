@@ -183,9 +183,18 @@ class SafetyRules:
         self._pranks = pranks
 
     def apply(
-        self, text: str, channel: Channel, caller_hash: str | None, decision: Decision
+        self,
+        text: str,
+        channel: Channel,
+        caller_hash: str | None,
+        decision: Decision,
+        prior_prank: float | None = None,
     ) -> RuleOutcome:
-        """O(L) per report: one pass per keyword group."""
+        """O(L) per report: one pass per keyword group.
+
+        ``prior_prank`` re-applies the rules to a revised decision without counting
+        the caller a second time in the repeat-caller window.
+        """
         fired: list[str] = []
         update: dict[str, object] = {}
         severity = decision.severity
@@ -215,7 +224,10 @@ class SafetyRules:
         if merged_hazards != decision.hazards:
             update["hazards"] = merged_hazards
 
-        prank = max(decision.prank_score, self._pranks.observe(caller_hash, decision.department))
+        observed = (
+            prior_prank if prior_prank is not None else self._pranks.observe(caller_hash, decision.department)
+        )
+        prank = max(decision.prank_score, observed)
         if LAUGHTER.search(text):
             prank = max(prank, 0.6)
         if prank > decision.prank_score:

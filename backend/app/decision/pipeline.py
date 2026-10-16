@@ -1,9 +1,15 @@
-"""System 1 decision pipeline: local classifier -> fast LLM (uncertain only) -> safety rules."""
+"""System 1 decision pipeline: local classifier + rules now; fast LLM revises uncertain ones.
+
+``decide_fast`` answers every report at once from the local model, so it reaches
+the board immediately. Reports below ``conf_threshold`` are then ``refine``d by the
+fast LLM in the background and revised in place. ``decide_batch`` chains both for
+callers that want the final answer directly (tests, benchmark).
+"""
 
 import asyncio
 from collections.abc import Sequence
 
-from app.decision.llm import LLMDecider, LLMOutcome
+from app.decision.llm import LLMDecider
 from app.decision.local import LocalClassifier
 from app.decision.rules import SafetyRules
 from app.models import Decision, DecisionResult, Report
@@ -25,29 +31,10 @@ UNTRIAGED = DecisionResult(
 OVERRIDING_RULES = ("silent_sos", "severity_floor")
 
 
-def _from_llm(outcome: LLMOutcome, prompt_version: str) -> DecisionResult:
-    return DecisionResult(
-        decision=outcome.decision,
-        source="llm",
-        confidence=outcome.decision.confidence,
-        model=f"{outcome.provider}/{outcome.model}",
-        prompt_version=prompt_version,
-    )
-
-
-def _needs_review(result: DecisionResult) -> DecisionResult:
-    """Local answer kept after an LLM failure: flagged for a human, never dropped."""
-    decision = result.decision.model_copy(update={"needs_human_review": True})
-    return result.model_copy(update={"decision": decision})
-
-
 class DecisionPipeline:
-    """Every report: local first; below ``conf_threshold`` the fast LLM; rules always last.
-
-    Without a trained model every report is marked for review. Without any LLM
-    provider configured, uncertain local answers stand and the confidence gates
-    route them to one-click confirm or review.
-    """
+    """Without a trained model every report is marked for review. Without any LLM
+    provider, uncertain local answers stand and the confidence gates route them
+    to one-click confirm or review."""
 
     def __init__(
         self,
@@ -61,32 +48,65 @@ class DecisionPipeline:
         self._rules = rules
         self._threshold = conf_threshold
 
-    async def decide_batch(self, reports: Sequence[Report]) -> list[DecisionResult]:
-        """One decision per report, in order.
+    def wants_llm(self, result: DecisionResult) -> bool:
+        """True when the fast LLM should revise this decision. Silent SOS stays with rules."""
+        return (
+            self._llm is not None
+            and result.confidence < self._threshold
+            and not result.decision.silent_sos
+        )
 
-        O(b·L) local work in a worker thread; uncertain items share LLM calls
-        with other in-flight batches; rules are O(L) per report.
-        """
+    async def decide_fast(self, reports: Sequence[Report]) -> list[DecisionResult]:
+        """Local model + rules for a batch. O(b·L), model work in a worker thread."""
         texts = [r.raw_text for r in reports]
         if self._local is None:
             results = [UNTRIAGED for _ in reports]
         else:
             results = await asyncio.to_thread(self._local.predict_batch, texts)
+        return [self._apply_rules(rep, res) for rep, res in zip(reports, results, strict=True)]
 
-        uncertain = [i for i, r in enumerate(results) if r.confidence < self._threshold]
-        if self._llm is not None and uncertain:
-            outcomes = await self._llm.decide([texts[i] for i in uncertain])
-            for i, outcome in zip(uncertain, outcomes, strict=True):
-                results[i] = (
-                    _from_llm(outcome, self._llm.prompt_version)
-                    if outcome is not None
-                    else _needs_review(results[i])
-                )
+    async def refine(
+        self, reports: Sequence[Report], fast: Sequence[DecisionResult]
+    ) -> list[DecisionResult]:
+        """LLM answers for uncertain reports, re-checked by the rules.
 
-        return [self._apply_rules(report, result) for report, result in zip(reports, results, strict=True)]
+        Items the LLM could not answer keep their local decision, flagged for review.
+        Shares LLM calls with every other in-flight batch (see LLMDecider).
+        """
+        assert self._llm is not None
+        outcomes = await self._llm.decide([r.raw_text for r in reports])
+        revised: list[DecisionResult] = []
+        for report, prior, outcome in zip(reports, fast, outcomes, strict=True):
+            if outcome is None:
+                decision = prior.decision.model_copy(update={"needs_human_review": True})
+                revised.append(prior.model_copy(update={"decision": decision}))
+                continue
+            result = DecisionResult(
+                decision=outcome.decision,
+                source="llm",
+                confidence=outcome.decision.confidence,
+                model=f"{outcome.provider}/{outcome.model}",
+                prompt_version=self._llm.prompt_version,
+            )
+            revised.append(self._apply_rules(report, result, prior_prank=prior.decision.prank_score))
+        return revised
 
-    def _apply_rules(self, report: Report, result: DecisionResult) -> DecisionResult:
-        outcome = self._rules.apply(report.raw_text, report.channel, report.caller_hash, result.decision)
+    async def decide_batch(self, reports: Sequence[Report]) -> list[DecisionResult]:
+        """Final decisions in one call: fast pass, then LLM revision of uncertain items."""
+        results = await self.decide_fast(reports)
+        uncertain = [i for i, r in enumerate(results) if self.wants_llm(r)]
+        if uncertain:
+            revised = await self.refine([reports[i] for i in uncertain], [results[i] for i in uncertain])
+            for i, result in zip(uncertain, revised, strict=True):
+                results[i] = result
+        return results
+
+    def _apply_rules(
+        self, report: Report, result: DecisionResult, prior_prank: float | None = None
+    ) -> DecisionResult:
+        outcome = self._rules.apply(
+            report.raw_text, report.channel, report.caller_hash, result.decision, prior_prank
+        )
         overridden = any(f.startswith(OVERRIDING_RULES) for f in outcome.fired)
         return result.model_copy(
             update={
