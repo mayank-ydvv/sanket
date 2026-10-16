@@ -16,19 +16,10 @@ _LINE = re.compile(r"^\[(\d+)\] (.*)$", re.MULTILINE)
 
 def valid_json(user: str) -> str:
     items = [
-        {
-            "idx": int(i),
-            "is_emergency": True,
-            "emergency_prob": 0.95,
-            "department": "fire",
-            "department_conf": 0.93,
-            "severity": 4,
-            "alert_now": True,
-            "hazards": ["smoke"],
-        }
+        {"i": int(i), "e": True, "p": 0.95, "d": "fire", "dc": 0.93, "s": 4, "a": True, "hz": ["smoke"]}
         for i, _ in _LINE.findall(user)
     ]
-    return json.dumps({"results": items})
+    return json.dumps({"r": items})
 
 
 class FakeProvider:
@@ -38,7 +29,7 @@ class FakeProvider:
         self.calls = 0
         self._respond = respond
 
-    async def complete(self, system: str, user: str) -> ProviderReply:
+    async def complete(self, system: str, user: str, max_output_tokens: int) -> ProviderReply:
         self.calls += 1
         if isinstance(self._respond, Exception):
             raise self._respond
@@ -47,7 +38,7 @@ class FakeProvider:
 
 def make_decider(*providers: FakeProvider, batch_wait_s: float = 0.05) -> LLMDecider:
     stats = LLMStats()
-    slots = [ProviderSlot(p, RateLimiter(rpm=1000, tpm=10_000_000)) for p in providers]
+    slots = [ProviderSlot(p, RateLimiter(rpm=1000, tpm=10_000_000, otpm=10_000_000)) for p in providers]
     return LLMDecider(FallbackChain(slots, stats, max_queue_wait_s=1.0), stats, 25, batch_wait_s, 4)
 
 
@@ -82,7 +73,7 @@ async def test_100_uncertain_reports_take_at_most_5_calls() -> None:
     assert len(results) == 100
     assert provider.calls <= 5
     assert all(r.source == "llm" and r.decision.department == "fire" for r in results)
-    assert all(r.prompt_version == "decision_v1" for r in results)
+    assert all(r.prompt_version == "decision_v2" for r in results)
 
 
 async def test_rate_limited_provider_falls_through_to_next() -> None:
@@ -121,7 +112,7 @@ async def test_partially_invalid_reply_reasks_only_missing_items() -> None:
         seen.append(count)
         payload = json.loads(valid_json(user))
         if len(seen) == 1:
-            payload["results"][1]["severity"] = 9  # invalid on first try
+            payload["r"][1]["s"] = 9  # invalid on first try
         return json.dumps(payload)
 
     results = await run_with(make_decider(FakeProvider("a", respond)), 3)
@@ -133,9 +124,9 @@ async def test_pipeline_does_not_block_event_loop() -> None:
     slow = FakeProvider("a", valid_json)
     original = slow.complete
 
-    async def delayed(system: str, user: str) -> ProviderReply:
+    async def delayed(system: str, user: str, max_output_tokens: int) -> ProviderReply:
         await asyncio.sleep(0.2)
-        return await original(system, user)
+        return await original(system, user, max_output_tokens)
 
     slow.complete = delayed  # type: ignore[method-assign]
     ticks = 0
@@ -155,8 +146,47 @@ async def test_pipeline_does_not_block_event_loop() -> None:
 def test_rate_limiter_reports_wait_and_refuses_long_waits() -> None:
     now = [0.0]
     limiter = RateLimiter(rpm=60, tpm=6000, clock=lambda: now[0])
-    assert limiter.reserve(100, max_wait_s=1) == 0.0
+    assert limiter.reserve(80, 20, max_wait_s=1) == 0.0
     for _ in range(59):
-        limiter.reserve(1, max_wait_s=1)
-    assert limiter.reserve(1, max_wait_s=0.5) is None  # would need ~1 s
-    assert limiter.reserve(1, max_wait_s=2) == pytest.approx(1.0, abs=0.05)
+        limiter.reserve(1, 0, max_wait_s=1)
+    assert limiter.reserve(1, 0, max_wait_s=0.5) is None  # would need ~1 s
+    assert limiter.reserve(1, 0, max_wait_s=2) == pytest.approx(1.0, abs=0.05)
+
+
+def test_output_token_budget_is_enforced() -> None:
+    now = [0.0]
+    limiter = RateLimiter(rpm=1000, tpm=100_000, otpm=1000, clock=lambda: now[0])
+    assert limiter.reserve(2000, 900, max_wait_s=0) == 0.0
+    assert limiter.reserve(2000, 900, max_wait_s=10) is None  # needs ~48 s of output budget
+    now[0] += 60
+    assert limiter.reserve(2000, 900, max_wait_s=0) == 0.0
+
+
+async def test_hard_error_parks_provider_instead_of_retrying_every_batch() -> None:
+    retired = FakeProvider("a", ProviderError("a", "HTTP 404: model retired", retryable=False))
+    b = FakeProvider("b", valid_json)
+    decider = make_decider(retired, b)
+    await run_with(decider, 5)
+    await run_with(decider, 5)
+    assert retired.calls == 1 and b.calls == 2
+
+
+def test_chain_order_follows_settings(settings) -> None:  # type: ignore[no-untyped-def]
+    import httpx
+
+    from app.decision.factory import build_slots
+
+    cfg = settings.model_copy(
+        update={"gemini_api_key": "g", "groq_api_key": "q", "llm_chain": ["gemini", "groq"]}
+    )
+    names = [s.provider.name for s in build_slots(cfg, httpx.AsyncClient())]
+    assert names == ["gemini"] * len(cfg.gemini_models) + ["groq"]
+
+
+def test_truncated_reply_keeps_complete_items() -> None:
+    from app.decision.llm import parse_decisions
+
+    full = valid_json("[0] a\n[1] b\n[2] c")
+    truncated = full[: full.rindex("{") + 12]  # third object cut mid-way
+    assert sorted(parse_decisions(truncated, 3)) == [0, 1]
+    assert parse_decisions("Sure! {oops", 3) == {}

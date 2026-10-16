@@ -25,11 +25,15 @@ from app.models import Decision, Department
 log = logging.getLogger(__name__)
 
 PROMPTS_DIR = Path(__file__).resolve().parents[2] / "prompts"
-DECISION_PROMPT_VERSION = "decision_v1"
+DECISION_PROMPT_VERSION = "decision_v2"
 COOLDOWN_BASE_S = 2.0
 COOLDOWN_MAX_S = 60.0
 CHARS_PER_TOKEN = 2.5
-OUTPUT_TOKENS_PER_ITEM = 90
+OUTPUT_TOKENS_PER_ITEM = 40
+# Hard cap on reply length: generous headroom over the estimate, so a valid reply
+# is never truncated while a runaway one cannot eat the output quota.
+OUTPUT_CAP_PER_ITEM = 60
+OUTPUT_CAP_BASE = 128
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$")
 
 
@@ -38,39 +42,65 @@ def load_prompt(version: str) -> str:
 
 
 class LLMItem(BaseModel):
-    """One element of the model's JSON array. Strict types; unknown keys are ignored."""
+    """One element of the model's compact JSON array (prompt decision_v2).
+
+    Short keys keep output tokens low, which is what bounds both latency and the
+    free tiers' output-token quotas. Strict types; unknown keys are ignored.
+    """
 
     model_config = ConfigDict(strict=True, extra="ignore")
 
-    idx: int
-    is_emergency: bool
-    emergency_prob: float = Field(ge=0.0, le=1.0)
-    department: Department
-    department_conf: float = Field(ge=0.0, le=1.0)
-    severity: int = Field(ge=1, le=5)
-    alert_now: bool
-    location_text: str | None = None
-    people_at_risk: str | None = None
-    hazards: list[str] = Field(default_factory=list)
-    silent_sos: bool = False
-    prank_score: float = Field(0.0, ge=0.0, le=1.0)
-    needs_human_review: bool = False
+    idx: int = Field(alias="i")
+    is_emergency: bool = Field(alias="e")
+    emergency_prob: float = Field(alias="p", ge=0.0, le=1.0)
+    department: Department = Field(alias="d")
+    department_conf: float = Field(alias="dc", ge=0.0, le=1.0)
+    severity: int = Field(alias="s", ge=1, le=5)
+    alert_now: bool = Field(False, alias="a")
+    location_text: str | None = Field(None, alias="loc")
+    people_at_risk: str | None = Field(None, alias="risk")
+    hazards: list[str] = Field(default_factory=list, alias="hz")
+    silent_sos: bool = Field(False, alias="sos")
+    prank_score: float = Field(0.0, alias="pr", ge=0.0, le=1.0)
+    needs_human_review: bool = Field(False, alias="rev")
 
     def to_decision(self) -> Decision:
         return Decision(**self.model_dump(exclude={"idx"}))
 
 
+def _salvage_objects(text: str) -> list[Any]:
+    """Every complete JSON object inside the first array of a truncated reply. O(L)."""
+    start = text.find("[")
+    if start < 0:
+        return []
+    decoder = json.JSONDecoder()
+    items: list[Any] = []
+    pos = start + 1
+    while True:
+        while pos < len(text) and text[pos] in " \t\r\n,":
+            pos += 1
+        if pos >= len(text) or text[pos] != "{":
+            return items
+        try:
+            obj, pos = decoder.raw_decode(text, pos)
+        except json.JSONDecodeError:
+            return items
+        items.append(obj)
+
+
 def parse_decisions(text: str, count: int) -> dict[int, Decision]:
-    """Parse ``{"results": [...]}`` (or a bare array) into decisions keyed by idx. O(n).
+    """Parse ``{"r": [...]}`` (or a bare array) into decisions keyed by idx. O(n).
 
     Items that fail validation, repeat an idx or fall outside ``[0, count)`` are dropped,
-    so one bad item never discards the rest of the batch.
+    so one bad item never discards the rest of the batch. A reply cut off by the
+    output cap still yields its complete items; the caller re-asks for the rest.
     """
+    cleaned = _FENCE.sub("", text.strip())
     try:
-        payload: Any = json.loads(_FENCE.sub("", text.strip()))
+        payload: Any = json.loads(cleaned)
+        items = payload.get("r") if isinstance(payload, dict) else payload
     except json.JSONDecodeError:
-        return {}
-    items = payload.get("results") if isinstance(payload, dict) else payload
+        items = _salvage_objects(cleaned)
     if not isinstance(items, list):
         return {}
     decisions: dict[int, Decision] = {}
@@ -88,7 +118,7 @@ def format_reports(texts: Sequence[str]) -> str:
     """Numbered, single-line report list for the user message. O(total L)."""
     lines = (f"[{i}] {' '.join(text.split()) or '(empty report)'}" for i, text in enumerate(texts))
     return (
-        "Reports:\n" + "\n".join(lines) + f"\n\nReturn {{\"results\": [...]}} with exactly {len(texts)} objects."
+        "Reports:\n" + "\n".join(lines) + f"\n\nReturn {{\"r\": [...]}} with exactly {len(texts)} objects."
     )
 
 
@@ -147,30 +177,37 @@ class FallbackChain:
         self._sleep = sleep
 
     def _cool_down(self, slot: ProviderSlot, error: ProviderError) -> None:
+        """Retryable errors back off exponentially with jitter; hard errors (bad key,
+        retired model) park the provider for the maximum cooldown."""
+        if not error.retryable:
+            slot.cooldown_until = self._clock() + COOLDOWN_MAX_S
+            return
         slot.failures += 1
         backoff = min(COOLDOWN_MAX_S, COOLDOWN_BASE_S * 2 ** (slot.failures - 1))
         delay = max(backoff * (0.5 + random.random()), error.retry_after or 0.0)
         slot.cooldown_until = self._clock() + delay
 
-    async def complete(self, system: str, user: str, est_tokens: int) -> ProviderReply:
+    async def complete(
+        self, system: str, user: str, est_input: int, est_output: int, max_output_tokens: int
+    ) -> ProviderReply:
         """One successful reply from the first usable provider. O(p) attempts for p providers."""
         for slot in self.slots:
-            name = slot.provider.name
+            name = f"{slot.provider.name}/{slot.provider.model}"
             if self._clock() < slot.cooldown_until:
                 continue
-            wait = slot.limiter.reserve(est_tokens, self._max_queue_wait_s)
+            wait = slot.limiter.reserve(est_input, est_output, self._max_queue_wait_s)
             if wait is None:
                 continue
             if wait > 0:
                 await self._sleep(wait)
             self._stats.calls[name] += 1
+            cap = min(max_output_tokens, slot.limiter.max_output_tokens or max_output_tokens)
             try:
-                reply = await slot.provider.complete(system, user)
+                reply = await slot.provider.complete(system, user, cap)
             except ProviderError as error:
                 self._stats.failures[name] += 1
                 log.warning("LLM provider failed: %s", error)
-                if error.retryable:
-                    self._cool_down(slot, error)
+                self._cool_down(slot, error)
                 continue
             slot.failures = 0
             self._stats.input_tokens[name] += reply.input_tokens
@@ -250,8 +287,9 @@ class LLMDecider:
                 break
         return batch
 
-    def _estimate_tokens(self, user: str, items: int) -> int:
-        return int((len(self._system) + len(user)) / CHARS_PER_TOKEN) + OUTPUT_TOKENS_PER_ITEM * items
+    def _estimate_tokens(self, user: str, items: int) -> tuple[int, int]:
+        """(input, output) token estimates used to reserve rate-limit budget. O(1)."""
+        return int((len(self._system) + len(user)) / CHARS_PER_TOKEN), OUTPUT_TOKENS_PER_ITEM * items
 
     async def _dispatch(self, batch: list[_Pending]) -> None:
         """Ask once; re-ask once for any items that came back missing or invalid."""
@@ -263,7 +301,12 @@ class LLMDecider:
             for _attempt in range(2):
                 user = format_reports([batch[i].text for i in todo])
                 try:
-                    reply = await self.chain.complete(self._system, user, self._estimate_tokens(user, len(todo)))
+                    reply = await self.chain.complete(
+                        self._system,
+                        user,
+                        *self._estimate_tokens(user, len(todo)),
+                        max_output_tokens=OUTPUT_CAP_BASE + OUTPUT_CAP_PER_ITEM * len(todo),
+                    )
                 except AllProvidersFailed:
                     break
                 decisions = parse_decisions(reply.text, len(todo))

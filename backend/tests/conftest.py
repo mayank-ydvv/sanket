@@ -34,8 +34,9 @@ def model_path(classifier: LocalClassifier, tmp_path_factory: pytest.TempPathFac
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
-    """App settings with no trained model: every report takes the review-all path."""
+    """Isolated from sanket/.env (no real keys, no live LLM calls) and with no trained model."""
     return Settings(
+        _env_file=None,  # type: ignore[call-arg]
         caller_salt=TEST_SALT,
         db_path=tmp_path / "test.db",
         local_model_path=tmp_path / "missing.joblib",
