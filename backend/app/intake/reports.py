@@ -1,18 +1,14 @@
 """Text intake: ``POST /reports`` and the recent-reports listing."""
 
-import time
-import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from pydantic import BaseModel
 
-from app.config import Settings
 from app.db import Database
-from app.deps import get_db, get_settings_dep, get_worker
+from app.deps import get_db
+from app.intake.service import Intake
 from app.models import Report, ReportIn
-from app.privacy import hash_caller
-from app.worker import PipelineWorker
 
 router = APIRouter(tags=["intake"])
 
@@ -22,23 +18,10 @@ class Accepted(BaseModel):
 
 
 @router.post("/reports", status_code=status.HTTP_202_ACCEPTED)
-async def create_report(
-    body: ReportIn,
-    settings: Annotated[Settings, Depends(get_settings_dep)],
-    db: Annotated[Database, Depends(get_db)],
-    worker: Annotated[PipelineWorker[object], Depends(get_worker)],
-) -> Accepted:
+async def create_report(body: ReportIn, request: Request) -> Accepted:
     """Persist the raw report, queue it for triage and return at once. O(L)."""
-    report = Report(
-        id=f"r_{uuid.uuid4().hex}",
-        channel=body.channel,
-        caller_hash=hash_caller(body.caller, settings.caller_salt),
-        raw_text=body.text,
-        received_at=time.time(),
-    )
-    async with db.transaction():
-        await db.insert_report(report)
-    worker.submit(report)
+    intake: Intake = request.app.state.intake
+    report = await intake.submit(body.text, body.channel, body.caller)
     return Accepted(id=report.id)
 
 
