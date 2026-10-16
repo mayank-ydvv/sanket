@@ -43,11 +43,16 @@ Every report: **local classifier → fast LLM (only if local confidence < 0.8) �
 
 - **Fast LLM** (`app/decision/llm.py`): uncertain reports from all in-flight batches are
   pooled for up to 300 ms / 25 items and sent as one JSON-mode request, so n uncertain
-  reports cost about n/25 calls. Providers: Gemini → Groq → OpenRouter → any
-  OpenAI-compatible endpoint (e.g. Jev), each with its own RPM/TPM token buckets. A 429/5xx
-  puts that provider in a jittered exponential cooldown and the batch moves on to the next
-  provider at once. Output is validated item by item; missing or invalid items are re-asked
-  once, then the local answer stands with `needs_human_review=true`.
+  reports cost about n/25 calls. Providers are tried in `LLM_CHAIN` order — by default
+  Groq (≈1 s) → each Gemini model in `GEMINI_MODELS` (separate free quotas) → OpenRouter →
+  any OpenAI-compatible endpoint (e.g. Jev) — each with its own RPM / TPM / output-TPM
+  buckets and an explicit output cap. A 429/5xx puts that provider in a jittered
+  exponential cooldown and the batch moves on to the next provider at once; hard errors
+  (bad key, retired model) park it. The `decision_v2` prompt uses short keys and omits
+  default fields (~45 output tokens per report), because output length is what sets both
+  latency and free-tier quotas. Output is validated item by item (complete items are
+  salvaged even from a truncated reply); missing or invalid items are re-asked once, then
+  the local answer stands with `needs_human_review=true`.
 - **Rules** (`app/decision/rules.py`) always run last and can only raise severity or add
   review flags: a life-safety severity floor of 3, silent SOS (tap codes, Morse, keyboard
   mash, "can't talk", empty calls → police + human review), hazard tags, and a prank score

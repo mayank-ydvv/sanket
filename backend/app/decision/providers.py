@@ -39,7 +39,7 @@ class Provider(Protocol):
     name: str
     model: str
 
-    async def complete(self, system: str, user: str) -> ProviderReply: ...
+    async def complete(self, system: str, user: str, max_output_tokens: int) -> ProviderReply: ...
 
 
 def _retry_after(response: httpx.Response) -> float | None:
@@ -67,9 +67,10 @@ async def _post_json(
     except httpx.TransportError as exc:
         raise ProviderError(provider, f"transport error: {exc!r}", retryable=True) from exc
     if response.status_code >= 400:
+        detail = " ".join(response.text.split())[:200]
         raise ProviderError(
             provider,
-            f"HTTP {response.status_code}",
+            f"HTTP {response.status_code}: {detail}",
             retryable=response.status_code in RETRYABLE_STATUS,
             retry_after=_retry_after(response),
         )
@@ -92,7 +93,7 @@ class GeminiProvider:
         self._api_key = api_key
         self._timeout = timeout
 
-    async def complete(self, system: str, user: str) -> ProviderReply:
+    async def complete(self, system: str, user: str, max_output_tokens: int) -> ProviderReply:
         start = time.perf_counter()
         data = await _post_json(
             self._client,
@@ -102,7 +103,11 @@ class GeminiProvider:
             body={
                 "systemInstruction": {"parts": [{"text": system}]},
                 "contents": [{"role": "user", "parts": [{"text": user}]}],
-                "generationConfig": {"responseMimeType": "application/json", "temperature": 0},
+                "generationConfig": {
+                    "responseMimeType": "application/json",
+                    "temperature": 0,
+                    "maxOutputTokens": max_output_tokens,
+                },
             },
             timeout=self._timeout,
         )
@@ -141,7 +146,9 @@ class OpenAICompatibleProvider:
         self._headers = {"Authorization": f"Bearer {api_key}", **(extra_headers or {})}
         self._timeout = timeout
 
-    async def complete(self, system: str, user: str) -> ProviderReply:
+    async def complete(self, system: str, user: str, max_output_tokens: int) -> ProviderReply:
+        """``max_tokens`` is always explicit: Groq otherwise reserves the model's whole
+        output window against its output-tokens-per-minute quota."""
         start = time.perf_counter()
         data = await _post_json(
             self._client,
@@ -152,6 +159,7 @@ class OpenAICompatibleProvider:
                 "model": self.model,
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
                 "temperature": 0,
+                "max_tokens": max_output_tokens,
                 "response_format": {"type": "json_object"},
             },
             timeout=self._timeout,
@@ -199,17 +207,30 @@ class TokenBucket:
 
 
 class RateLimiter:
-    """Requests-per-minute and tokens-per-minute buckets for one provider."""
+    """Request, total-token and (optional) output-token buckets for one provider/model."""
 
-    def __init__(self, rpm: float, tpm: float, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(
+        self,
+        rpm: float,
+        tpm: float,
+        otpm: float | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._requests = TokenBucket(rpm, clock)
         self._tokens = TokenBucket(tpm, clock)
+        self._output = TokenBucket(otpm, clock) if otpm else None
+        self.max_output_tokens = int(otpm) if otpm else None
 
-    def reserve(self, est_tokens: int, max_wait_s: float) -> float | None:
+    def reserve(self, est_input: int, est_output: int, max_wait_s: float) -> float | None:
         """Reserve one request; return the wait in seconds, or None if it exceeds ``max_wait_s``."""
-        wait = max(self._requests.wait_time(1), self._tokens.wait_time(est_tokens))
+        waits = [self._requests.wait_time(1), self._tokens.wait_time(est_input + est_output)]
+        if self._output is not None:
+            waits.append(self._output.wait_time(est_output))
+        wait = max(waits)
         if wait > max_wait_s:
             return None
         self._requests.take(1)
-        self._tokens.take(est_tokens)
+        self._tokens.take(est_input + est_output)
+        if self._output is not None:
+            self._output.take(est_output)
         return wait

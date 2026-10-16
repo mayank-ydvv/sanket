@@ -8,17 +8,19 @@ from app.decision.providers import GeminiProvider, OpenAICompatibleProvider, Pro
 
 
 def build_slots(settings: Settings, http: httpx.AsyncClient) -> list[ProviderSlot]:
-    """Fallback order: Gemini -> Groq -> OpenRouter -> custom OpenAI-compatible."""
+    """Providers with a key, in ``settings.llm_chain`` order (default Groq first: fastest)."""
     timeout = settings.llm_timeout_s
-    slots: list[tuple[Provider, int, int]] = []
+    slots: list[tuple[Provider, int, int, int | None]] = []
     if settings.gemini_api_key:
-        slots.append(
-            (
-                GeminiProvider(http, settings.gemini_api_key, settings.gemini_model, timeout),
-                settings.gemini_rpm,
-                settings.gemini_tpm,
+        for model in settings.gemini_models:
+            slots.append(
+                (
+                    GeminiProvider(http, settings.gemini_api_key, model, timeout),
+                    settings.gemini_rpm,
+                    settings.gemini_tpm,
+                    None,
+                )
             )
-        )
     if settings.groq_api_key:
         slots.append(
             (
@@ -28,6 +30,7 @@ def build_slots(settings: Settings, http: httpx.AsyncClient) -> list[ProviderSlo
                 ),
                 settings.groq_rpm,
                 settings.groq_tpm,
+                settings.groq_otpm,
             )
         )
     if settings.openrouter_api_key:
@@ -39,6 +42,7 @@ def build_slots(settings: Settings, http: httpx.AsyncClient) -> list[ProviderSlo
                 ),
                 settings.openrouter_rpm,
                 settings.openrouter_tpm,
+                None,
             )
         )
     if settings.custom_llm_base_url and settings.custom_llm_api_key and settings.custom_llm_model:
@@ -50,9 +54,12 @@ def build_slots(settings: Settings, http: httpx.AsyncClient) -> list[ProviderSlo
                 ),
                 settings.custom_llm_rpm,
                 settings.custom_llm_tpm,
+                None,
             )
         )
-    return [ProviderSlot(provider, RateLimiter(rpm, tpm)) for provider, rpm, tpm in slots]
+    rank = {name: i for i, name in enumerate(settings.llm_chain)}
+    ordered = sorted((s for s in slots if s[0].name in rank), key=lambda s: rank[s[0].name])
+    return [ProviderSlot(provider, RateLimiter(rpm, tpm, otpm)) for provider, rpm, tpm, otpm in ordered]
 
 
 def build_llm_decider(settings: Settings, http: httpx.AsyncClient) -> LLMDecider | None:

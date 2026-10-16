@@ -33,18 +33,21 @@ class Settings(BaseSettings):
     llm_batch_size: int = Field(25, ge=1)
     llm_batch_wait_ms: int = Field(300, ge=0)
     llm_max_concurrency: int = Field(4, ge=1)
-    llm_timeout_s: float = Field(8.0, gt=0)
+    llm_timeout_s: float = Field(15.0, gt=0)
+    llm_chain: list[str] = ["groq", "gemini", "openrouter", "custom"]
     llm_max_queue_wait_s: float = Field(1.5, ge=0)
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-2.5-flash"
+    # Free quotas are per model, so each listed model is its own fallback slot.
+    gemini_models: list[str] = ["gemini-3.5-flash-lite", "gemini-3.5-flash"]
     gemini_rpm: int = 10
     gemini_tpm: int = 250_000
     groq_api_key: str | None = None
-    groq_model: str = "llama-3.1-8b-instant"
+    groq_model: str = "qwen/qwen3.8-27b"
     groq_rpm: int = 30
-    groq_tpm: int = 6_000
+    groq_tpm: int = 8_000
+    groq_otpm: int | None = 1_000
     openrouter_api_key: str | None = None
-    openrouter_model: str = "meta-llama/llama-3.3-70b-instruct:free"
+    openrouter_model: str = "google/gemma-4-31b-it:free"
     openrouter_rpm: int = 20
     openrouter_tpm: int = 100_000
     custom_llm_base_url: str | None = None
