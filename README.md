@@ -153,3 +153,32 @@ approval), so calling it from an Indian phone is an international call for the c
 Spoken numbers are a weak spot: in a test, "सेक्टर बासठ" (sector sixty-two) was transcribed as
 "सेक्तर बासक", so the gazetteer cannot place it and the LLM's location extraction or a
 dispatcher callback has to.
+
+## Disaster mode and cost ticker
+
+`POST /simulate/disaster?n=500&seconds=10&scenario=flood` (or the **Disaster mode** button)
+streams a seeded flood surge through the real pipeline: 12 events across the district
+(rooftop rescues, a bus in an underpass, a wall collapse, live wires in water, a building
+with both a gas smell and a fire upstairs, looting, …) in five languages, with callers
+calling back, panic and typos, one prank caller sending contradicting reports, two silent
+SOS calls and some non-urgent noise. `GET /simulate/status` and `simulation.updated`
+events show progress.
+
+The **cost ticker** (`cost.updated`, at most 2×/s) prices the tokens the providers actually
+report, per model, at list price, against a counterfactual of sending every report alone to
+a large reasoning model (full prompt + reasoning output). Free tiers bill ₹0; both numbers
+are list price, so the comparison holds at production scale.
+
+Measured live (free tiers, 2026-10-17), 500 reports in 10 s:
+
+| | |
+|---|---|
+| all 500 reports decided and on the board | 10.2 s after the first (pipeline 0.2 s behind intake) |
+| LLM calls | 18–20 (343 reports revised by the LLM; the rest kept their local decision when free-tier limits hit) |
+| cost at list price | ₹0.54–0.79 vs ₹477.75 for all-to-large-LLM (≈ 99.8% less; ₹1.6 vs ₹955 per 1,000 reports) |
+| incidents | the 12 events → 12 large incidents (16–71 reports each), plus ~25 small ones: non-urgent complaints, the prank caller's decoys, both silent SOS calls (always kept separate), and singletons whose LLM call fell back |
+| API memory | ~0.9 GB RSS with both models loaded |
+
+The simulator reuses the corpus phrasings, including those the local model trained on, so
+disaster mode shows system behaviour, not accuracy. Accuracy comes from the held-out test
+set (`scripts/benchmark.py`, Phase 9).

@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from app.models import Contact
+from app.models import Contact, Price
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -47,6 +47,19 @@ class Settings(BaseSettings):
     cluster_radius_km: float = Field(1.0, gt=0)
     cluster_window_s: float = Field(1800.0, gt=0)
     cluster_unlocated_candidates: int = Field(50, ge=1)
+
+    # Cost ticker. List prices in USD per 1M tokens (check providers' pricing pages);
+    # the counterfactual is every report sent alone to a large reasoning model.
+    llm_prices: dict[str, Price] = {
+        "qwen/qwen3.8-27b": Price(input=0.29, output=0.59),
+        "gemini-3.5-flash-lite": Price(input=0.10, output=0.40),
+        "gemini-3.5-flash": Price(input=0.30, output=2.50),
+        "google/gemma-4-31b-it:free": Price(input=0.0, output=0.0),
+    }
+    counterfactual_price: Price = Price(input=2.50, output=15.00)
+    counterfactual_input_tokens: int = 1550  # full decision prompt + one report
+    counterfactual_output_tokens: int = 500  # full JSON answer + reasoning tokens
+    usd_to_inr: float = 84.0
 
     # Telephony intake (Twilio webhooks) and speech-to-text.
     # PUBLIC_BASE_URL is the tunnel URL Twilio calls; signatures are computed over it.

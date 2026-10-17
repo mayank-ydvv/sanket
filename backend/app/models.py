@@ -128,6 +128,13 @@ class Incident(BaseModel):
     overrides: dict[str, str | int] = Field(default_factory=dict)
 
 
+class Price(BaseModel):
+    """US dollars per million tokens."""
+
+    input: float
+    output: float
+
+
 class Contact(BaseModel):
     """One rung of a department's escalation ladder (station first, supervisor last)."""
 

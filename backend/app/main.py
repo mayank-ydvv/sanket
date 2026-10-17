@@ -9,7 +9,9 @@ import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app import incidents_api, ws
+from app import incidents_api, simulate_api, ws
+from app.cost import CostMeter
+from app.simulate import SimulationRunner
 from app.alerts.senders import AlertSender, MockSender, TwilioSmsSender
 from app.alerts.service import AlertService
 from app.cluster.embed import Embedder, HashingEmbedder, SentenceEmbedder
@@ -144,12 +146,26 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
         app.state.broadcaster = broadcaster
         app.state.alerts = alerts
         app.state.triage = triage
-        app.state.intake = Intake(db, worker, cfg.caller_salt)
+        intake = Intake(db, worker, cfg.caller_salt)
+        app.state.intake = intake
+        app.state.simulation = SimulationRunner(intake, broadcaster, lambda: worker.processed)
+        cost = CostMeter(
+            llm.stats if llm is not None else None,
+            cfg.llm_prices,
+            cfg.counterfactual_price,
+            (cfg.counterfactual_input_tokens, cfg.counterfactual_output_tokens),
+            cfg.usd_to_inr,
+            lambda: worker.processed,
+            broadcaster,
+        )
+        app.state.cost = cost
+        tasks.append(asyncio.create_task(cost.run(), name="cost-meter"))
         app.state.stt = build_stt(cfg, http)
         app.state.voice_tasks = set()
         try:
             yield
         finally:
+            app.state.simulation.cancel()
             for task in [*tasks, *app.state.voice_tasks]:
                 task.cancel()
             for task in [*tasks, *app.state.voice_tasks]:
@@ -180,10 +196,12 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
             "llm": llm.stats.as_dict() if llm is not None else None,
             "llm_chain": [s.provider.name for s in llm.chain.slots] if llm is not None else [],
             "geocoder_network_calls": app.state.geocoder.network_calls,
+            "cost": app.state.cost.snapshot().model_dump(),
         }
 
     app.include_router(reports.router)
     app.include_router(twilio.router)
+    app.include_router(simulate_api.router)
     app.include_router(incidents_api.router)
     app.include_router(incidents_api.alerts_router)
     app.include_router(ws.router)
