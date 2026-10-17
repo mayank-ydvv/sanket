@@ -155,3 +155,12 @@ async def test_nominatim_hit_sharing_no_token_with_query_is_rejected(db: Databas
 def test_fuzzy_match_never_changes_numbers() -> None:
     assert gazetteer_lookup("Sector 44 market") is None
     assert extract_location("aag lagi sector 44 market mein") == "Sector 44"
+
+
+async def test_generic_place_words_alone_are_not_a_location(db: Database) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[{"lat": "28.6", "lon": "77.3", "display_name": "Ashok Colony, Ghaziabad"}])
+
+    geo = Geocoder(httpx.AsyncClient(transport=httpx.MockTransport(handler)), db, config())
+    assert await geo.geocode("colony") is None
+    assert await geo.geocode("ashok colony") is not None

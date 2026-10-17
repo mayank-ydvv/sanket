@@ -274,7 +274,7 @@ class IncidentService:
                 )
                 incident_id = self._place(report, item.vector, created)
                 touched.add(incident_id)
-                twin = self._index.find_twin(incident_id)
+                twin = None if item.result.decision.silent_sos else self._index.find_twin(incident_id)
                 if twin is not None:
                     keep, gone = self._merge(incident_id, twin.incident_id)
                     merged.append(self._merged_snapshot(gone, keep))
@@ -315,8 +315,19 @@ class IncidentService:
         )
 
     def _place(self, report: Report, vector: Vector, created: set[str]) -> str:
+        """Join the best-matching incident or start one. A silent SOS always starts its
+        own: with no words and often no location, it must never be folded into
+        another caller's incident."""
         assert report.decision is not None
         lat, lng = report.lat, report.lng
+        if report.decision.silent_sos:
+            incident_id = _new_incident_id()
+            # A private pool key: no other report's candidate lookup can reach it.
+            self._index.add(incident_id, vector, f"silent:{incident_id}", lat, lng)
+            self._meta[incident_id] = IncidentMeta(first_seen=report.received_at)
+            self._meta[incident_id].add(report, lat is not None)
+            created.add(incident_id)
+            return incident_id
         match = self._index.best_match(vector, report.decision.department, lat, lng)
         if match is None:
             incident_id = _new_incident_id()

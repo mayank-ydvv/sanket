@@ -4,8 +4,7 @@ import random
 from dataclasses import dataclass
 
 from app.cluster.location import GAZETTEER
-from scripts.corpus import EVENTS, FRAMES, LANGUAGES, PANIC
-from scripts.gen_data import add_typos
+from app.corpus import EVENTS, FRAMES, LANGUAGES, PANIC, add_typos
 
 
 @dataclass(frozen=True)

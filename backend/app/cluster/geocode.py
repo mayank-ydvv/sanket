@@ -42,14 +42,26 @@ class GeocoderConfig:
     network: bool = True
 
 
-def _plausible(query: str, result: dict[str, object]) -> bool:
-    """Reject fuzzy hits that share no token with the query (e.g. "3rd floor" -> a street).
+# Words that appear in thousands of place names and so identify nothing on their own.
+GENERIC_PLACE_WORDS = frozenset(
+    "colony road street lane market area building house floor near nagar chowk metro station "
+    "bridge park city village block tower society gate temple mandir school hospital sector "
+    "main new old the and".split()
+)
 
-    A query token counts if it is a number or at least 3 characters long. O(L).
+
+def _plausible(query: str, result: dict[str, object]) -> bool:
+    """Accept a hit only if it shares a *specific* token with the query.
+
+    "3rd floor" or "colony" can match some street somewhere; a number, or a
+    name-like word of 3+ characters that is not generic, must match. O(L).
     """
     name = normalize(str(result.get("display_name", "")))
     words = set(name.split())
-    return any((token.isdigit() or len(token) >= 3) and token in words for token in query.split())
+    return any(
+        token in words and (token.isdigit() or (len(token) >= 3 and token not in GENERIC_PLACE_WORDS))
+        for token in query.split()
+    )
 
 
 class Geocoder:

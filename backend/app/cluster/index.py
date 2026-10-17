@@ -120,6 +120,8 @@ class IncidentIndex:
                 for dj in (-1, 0, 1):
                     for incident_id in self._cells.get((ci + di, cj + dj), ()):
                         inc = self._incidents[incident_id]
+                        if inc.department.startswith("silent:"):
+                            continue  # silent SOS incidents never absorb other reports
                         if haversine_km(lat, lng, inc.lat, inc.lng) <= self._radius_km:  # type: ignore[arg-type]
                             seen[incident_id] = inc
             pool = self._recent_unlocated.get(department)

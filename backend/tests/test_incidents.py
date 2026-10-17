@@ -155,3 +155,21 @@ async def test_500_reports_about_12_events_give_12_plus_minus_2_incidents(
     print(f"\nseed {seed}: 500 reports -> {len(open_incidents)} incidents in {elapsed:.1f}s")
     assert 10 <= len(open_incidents) <= 14
     assert sum(i.report_count for i in open_incidents) == 500
+
+
+async def test_silent_sos_reports_never_merge(db: Database) -> None:
+    service = IncidentService(db, make_index())
+    embedder = HashingEmbedder()
+    robbery = await placed(db, embedder, ["robbery at a jewellery shop"], department="police", point=None, location=None)
+    await service.assign(robbery)
+    silent: list[Placed] = []
+    for text in ("1111 1111 1111", "1111 1111 1111"):
+        item = (await placed(db, embedder, [text], department="police", point=None, location=None))[0]
+        sos = item.result.decision.model_copy(update={"silent_sos": True, "needs_human_review": True})
+        silent.append(Placed(item.report, item.result.model_copy(update={"decision": sos}), item.vector, None, None))
+    out = await service.assign(silent)
+    assert len(out.created) == 2  # two callers, two incidents, neither joins the robbery
+    later = await placed(db, embedder, ["1111 1111 1111 robbery"], department="police", point=None, location=None)
+    joined = await service.assign(later)
+    assert not any(i.silent_sos for i in joined.updated)
+    assert len([i for i in await db.incidents("open", 10) if i.silent_sos]) == 2
