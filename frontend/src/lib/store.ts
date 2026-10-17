@@ -1,15 +1,17 @@
-import type { Alert, Incident, LiveEvent, Report } from "../types";
+import type { Alert, CostSnapshot, Incident, LiveEvent, Report, SimulationStatus } from "../types";
 
 export interface LiveState {
   incidents: Map<string, Incident>;
   reports: Map<string, Report>;
   alerts: Map<string, Alert>;
+  cost: CostSnapshot | null;
+  simulation: SimulationStatus | null;
 }
 
 export const MAX_REPORTS = 2000;
 
 export function emptyState(): LiveState {
-  return { incidents: new Map(), reports: new Map(), alerts: new Map() };
+  return { incidents: new Map(), reports: new Map(), alerts: new Map(), cost: null, simulation: null };
 }
 
 /** Board order: most severe first, then whoever has waited longest. */
@@ -42,6 +44,7 @@ export function applyEvents(state: LiveState, events: LiveEvent[]): { state: Liv
   let incidents = state.incidents;
   let reports = state.reports;
   let alerts = state.alerts;
+  let { cost, simulation } = state;
   const missing: string[] = [];
   for (const event of events) {
     const [entity, kind] = event.type.split(".") as [string, string];
@@ -55,13 +58,17 @@ export function applyEvents(state: LiveState, events: LiveEvent[]): { state: Liv
     } else if (entity === "alert") {
       if (alerts === state.alerts) alerts = new Map(alerts);
       upsert(alerts, event.data as Partial<Alert> & { id: string }, full);
+    } else if (entity === "cost") {
+      cost = { ...(cost ?? {}), ...event.data } as CostSnapshot;
+    } else if (entity === "simulation") {
+      simulation = { ...(simulation ?? {}), ...event.data } as SimulationStatus;
     }
   }
   if (reports !== state.reports && reports.size > MAX_REPORTS) {
     const oldest = [...reports.values()].sort((a, b) => a.received_at - b.received_at);
     for (const report of oldest.slice(0, reports.size - MAX_REPORTS)) reports.delete(report.id);
   }
-  return { state: { incidents, reports, alerts }, missing };
+  return { state: { incidents, reports, alerts, cost, simulation }, missing };
 }
 
 export function latestAlertFor(alerts: Map<string, Alert>, incidentId: string): Alert | undefined {
@@ -89,4 +96,11 @@ export function waitingLabel(firstSeen: number, now: number): string {
   if (seconds < 60) return `${seconds}s`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
   return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+}
+
+const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
+
+export function formatInr(value: number): string {
+  if (value > 0 && value < 0.01) return "<₹0.01";
+  return inr.format(value);
 }

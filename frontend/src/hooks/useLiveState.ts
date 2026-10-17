@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { applyEvents, emptyState, type LiveState } from "../lib/store";
-import type { Alert, Incident, LiveEvent, Report, ServerMessage } from "../types";
+import type { Alert, CostSnapshot, Incident, LiveEvent, Report, ServerMessage, SimulationStatus } from "../types";
 import { useSocket, type SocketStatus } from "./useSocket";
 
 async function getJson<T>(url: string): Promise<T | null> {
@@ -29,15 +29,19 @@ export function useLiveState(): { state: LiveState; status: SocketStatus } {
   }, []);
 
   const loadSnapshot = useCallback(async () => {
-    const [incidents, reports, alerts] = await Promise.all([
+    const [incidents, reports, alerts, stats, simulation] = await Promise.all([
       getJson<Incident[]>("/api/incidents?limit=300"),
       getJson<Report[]>("/api/reports?limit=300"),
       getJson<Alert[]>("/api/alerts?limit=300"),
+      getJson<{ cost: CostSnapshot }>("/api/stats"),
+      getJson<SimulationStatus>("/api/simulate/status"),
     ]);
     apply([
       ...(incidents ?? []).map((data) => ({ type: "incident.created", data }) as LiveEvent),
       ...(reports ?? []).map((data) => ({ type: "report.created", data }) as LiveEvent),
       ...(alerts ?? []).map((data) => ({ type: "alert.sent", data }) as LiveEvent),
+      ...(stats ? [{ type: "cost.updated", data: stats.cost } as LiveEvent] : []),
+      ...(simulation ? [{ type: "simulation.updated", data: simulation } as LiveEvent] : []),
     ]);
   }, [apply]);
 

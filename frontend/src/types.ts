@@ -90,6 +90,34 @@ export interface IncidentDetail {
   alerts: Alert[];
 }
 
+export interface CostSnapshot {
+  id: "cost";
+  reports: number;
+  llm_calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  sanket_inr: number;
+  counterfactual_inr: number;
+  saved_pct: number;
+  sanket_per_1000_inr: number;
+  counterfactual_per_1000_inr: number;
+  billed_inr: number;
+}
+
+export interface SimulationStatus {
+  id: "simulation";
+  scenario: string | null;
+  running: boolean;
+  total: number;
+  submitted: number;
+  decided: number;
+  events: number;
+  started_at: number | null;
+  submitted_s: number | null;
+  decided_s: number | null;
+  error: string | null;
+}
+
 /** Created events carry the full entity; updated events carry `id` + changed fields only. */
 export type LiveEvent =
   | { type: "incident.created"; data: Incident }
@@ -97,6 +125,8 @@ export type LiveEvent =
   | { type: "report.created"; data: Report }
   | { type: "report.updated"; data: Partial<Report> & { id: string } }
   | { type: "alert.sent"; data: Alert }
-  | { type: "alert.updated"; data: Partial<Alert> & { id: string } };
+  | { type: "alert.updated"; data: Partial<Alert> & { id: string } }
+  | { type: "cost.updated"; data: Partial<CostSnapshot> & { id: "cost" } }
+  | { type: "simulation.updated"; data: Partial<SimulationStatus> & { id: "simulation" } };
 
 export type ServerMessage = { type: "batch"; data: LiveEvent[] };

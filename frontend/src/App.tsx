@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import { Board } from "./components/Board";
+import { CostTicker } from "./components/CostTicker";
+import { DisasterButton } from "./components/DisasterMode";
 import { IncidentDetail } from "./components/IncidentDetail";
 import { MapView } from "./components/MapView";
 import { useLiveState } from "./hooks/useLiveState";
@@ -52,6 +54,10 @@ export default function App() {
               {status === "open" ? "live" : status} · Noida demo district
             </p>
           </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-4">
+          <DisasterButton simulation={state.simulation} />
+          <CostTicker cost={state.cost} />
         </div>
         <div className="flex items-center gap-5">
           <Stat label="open" value={stats.open} />

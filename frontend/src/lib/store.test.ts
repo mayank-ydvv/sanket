@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Alert, Incident } from "../types";
-import { applyEvents, emptyState, escalationExhausted, liveAlertFor, rankIncidents, waitingLabel } from "./store";
+import { applyEvents, emptyState, escalationExhausted, formatInr, liveAlertFor, rankIncidents, waitingLabel } from "./store";
 
 const incident = (id: string, severity: number, first_seen: number, extra: Partial<Incident> = {}): Incident => ({
   id,
@@ -73,5 +73,24 @@ describe("waitingLabel", () => {
     expect(waitingLabel(100, 145_000)).toBe("45s");
     expect(waitingLabel(100, 230_000)).toBe("2m 10s");
     expect(waitingLabel(0, 3_900_000)).toBe("1h 5m");
+  });
+});
+
+describe("singleton entities", () => {
+  it("merge cost and simulation diffs without touching the maps", () => {
+    const start = emptyState();
+    const { state } = applyEvents(start, [
+      { type: "cost.updated", data: { id: "cost", sanket_inr: 0.4, counterfactual_inr: 60 } },
+      { type: "simulation.updated", data: { id: "simulation", running: true, total: 500, submitted: 25 } },
+      { type: "simulation.updated", data: { id: "simulation", submitted: 50 } },
+    ]);
+    expect(state.cost).toMatchObject({ sanket_inr: 0.4, counterfactual_inr: 60 });
+    expect(state.simulation).toMatchObject({ running: true, total: 500, submitted: 50 });
+    expect(state.incidents).toBe(start.incidents);
+  });
+
+  it("formats rupees, including sub-paisa amounts", () => {
+    expect(formatInr(62.4)).toBe("₹62.40");
+    expect(formatInr(0.004)).toBe("<₹0.01");
   });
 });
