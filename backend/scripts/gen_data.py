@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TypeVar
 
-from scripts.corpus import (
+from app.corpus import (
     DEPARTMENTS,
     ESCALATORS,
     ESCALATORS_BY_DEPARTMENT,
@@ -32,8 +32,10 @@ from scripts.corpus import (
     PRANKS,
     VAGUE_LOCATIONS,
     Event,
+    LATIN_LANGUAGES,
     HardCase,
     Template,
+    add_typos,
 )
 from scripts.dataset import TEST_PATH, TRAIN_PATH, Category, LabeledReport
 
@@ -48,11 +50,6 @@ P_PANIC = 0.35
 P_TYPO = 0.3
 P_SHOUT = 0.1
 T = TypeVar("T")
-LATIN_LANGUAGES = frozenset({"en", "hinglish"})
-KEYBOARD_NEIGHBOURS = {
-    "a": "sq", "e": "wr", "i": "uo", "o": "ip", "n": "bm", "s": "ad", "t": "ry", "r": "et",
-    "h": "gj", "l": "k", "g": "fh", "d": "sf", "m": "n", "u": "yi", "c": "xv", "p": "o",
-}
 
 
 def in_split(index: int, split: str) -> bool:
@@ -85,26 +82,6 @@ def pick_template(
     if category == "non_urgent":
         return rng.choice(held_out(NON_URGENT[language], split))
     return Template("none", 1, rng.choice(held_out(PRANKS[language], split)))
-
-
-def add_typos(text: str, language: str, rng: random.Random) -> str:
-    """Apply 1–2 realistic typos (drop / double / swap / neighbour key). O(L)."""
-    chars = list(text)
-    for _ in range(rng.randint(1, 2)):
-        positions = [i for i, ch in enumerate(chars) if ch.isalpha()]
-        if len(positions) < 4:
-            break
-        i = rng.choice(positions[1:-1])
-        op = rng.choice(("drop", "double", "swap", "neighbour") if language in LATIN_LANGUAGES else ("drop", "double"))
-        if op == "drop":
-            del chars[i]
-        elif op == "double":
-            chars.insert(i, chars[i])
-        elif op == "swap":
-            chars[i], chars[i + 1] = chars[i + 1], chars[i]
-        elif chars[i].lower() in KEYBOARD_NEIGHBOURS:
-            chars[i] = rng.choice(KEYBOARD_NEIGHBOURS[chars[i].lower()])
-    return "".join(chars)
 
 
 def render(

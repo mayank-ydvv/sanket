@@ -6,10 +6,12 @@ and pranks are whole templates. The generator holds out every third event /
 template per language for the test split, so test phrasings are never trained on.
 """
 
+import random
 from typing import NamedTuple
 
 Language = str  # "en" | "hinglish" | "hi" | "ta" | "bn"
 LANGUAGES: tuple[Language, ...] = ("en", "hinglish", "hi", "ta", "bn")
+LATIN_LANGUAGES = frozenset({"en", "hinglish"})
 DEPARTMENTS: tuple[str, ...] = ("fire", "police", "medical", "disaster", "utilities")
 
 
@@ -706,3 +708,28 @@ LEXICON: dict[Language, dict[str, tuple[str, ...]]] = {
                       "খুঁটিতে স্পার্ক", "খোলা নর্দমা", "বিদ্যুতের লাইন পড়ে গেছে"),
     },
 }
+
+KEYBOARD_NEIGHBOURS = {
+    "a": "sq", "e": "wr", "i": "uo", "o": "ip", "n": "bm", "s": "ad", "t": "ry", "r": "et",
+    "h": "gj", "l": "k", "g": "fh", "d": "sf", "m": "n", "u": "yi", "c": "xv", "p": "o",
+}
+
+
+def add_typos(text: str, language: str, rng: random.Random) -> str:
+    """Apply 1–2 realistic typos (drop / double / swap / neighbour key). O(L)."""
+    chars = list(text)
+    for _ in range(rng.randint(1, 2)):
+        positions = [i for i, ch in enumerate(chars) if ch.isalpha()]
+        if len(positions) < 4:
+            break
+        i = rng.choice(positions[1:-1])
+        op = rng.choice(("drop", "double", "swap", "neighbour") if language in LATIN_LANGUAGES else ("drop", "double"))
+        if op == "drop":
+            del chars[i]
+        elif op == "double":
+            chars.insert(i, chars[i])
+        elif op == "swap":
+            chars[i], chars[i + 1] = chars[i + 1], chars[i]
+        elif chars[i].lower() in KEYBOARD_NEIGHBOURS:
+            chars[i] = rng.choice(KEYBOARD_NEIGHBOURS[chars[i].lower()])
+    return "".join(chars)
