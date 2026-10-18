@@ -1,23 +1,130 @@
 @import "tailwindcss";
 
-@theme {
-  --color-bg: #0b1020;
-  --color-panel: #121a2e;
-  --color-line: #1f2a44;
-  --color-ink: #e5e9f2;
-  --color-mute: #8b95ab;
-  --color-signal: #f97316;
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Design tokens. Light is the default; .dark on <html> switches every role. */
+:root {
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --surface-2: #f1f5f9;
+  --line: #e2e8f0;
+  --line-strong: #cbd5e1;
+  --ink: #0f172a;
+  --ink-2: #334155;
+  --mute: #64748b;
+  --accent: #ea580c;
+  --accent-hover: #c2410c;
+  --accent-soft: #fff1e8;
+  --accent-ink: #9a3412;
+  --live: #0ea5e9;
+  --live-soft: #e0f2fe;
+  --good: #16a34a;
+  --warn: #d97706;
+  --danger: #dc2626;
+  --sev-5: #dc2626;
+  --sev-4: #ea580c;
+  --sev-3: #d97706;
+  --sev-2: #0284c7;
+  --sev-1: #94a3b8;
+  --shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 8px 24px -12px rgb(15 23 42 / 0.12);
 }
 
-html,
-body,
-#root {
-  height: 100%;
+.dark {
+  --bg: #0b1020;
+  --surface: #121a2e;
+  --surface-2: #18223a;
+  --line: #222d47;
+  --line-strong: #2e3b5a;
+  --ink: #e5e9f2;
+  --ink-2: #c3cad9;
+  --mute: #8b95ab;
+  --accent: #ea580c;
+  --accent-hover: #f97316;
+  --accent-soft: #2a1a12;
+  --accent-ink: #fdba74;
+  --live: #0ea5e9;
+  --live-soft: #0c2536;
+  --good: #22c55e;
+  --warn: #f59e0b;
+  --danger: #ef4444;
+  --sev-5: #ef4444;
+  --sev-4: #f97316;
+  --sev-3: #f59e0b;
+  --sev-2: #38bdf8;
+  --sev-1: #64748b;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 32px -16px rgb(0 0 0 / 0.6);
 }
 
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-mute: var(--mute);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+  --color-live: var(--live);
+  --color-live-soft: var(--live-soft);
+  --color-good: var(--good);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  /* shadcn-style names the Magic UI sources use */
+  --color-background: var(--surface);
+  --color-foreground: var(--ink);
+  --color-primary: var(--accent);
+  --color-primary-foreground: #ffffff;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --shadow-card: var(--shadow);
+
+  /* Magic UI animations */
+  --animate-ripple: ripple var(--duration, 2s) ease calc(var(--i, 0) * 0.2s) infinite;
+  --animate-pulse-ring: pulse-ring var(--duration) ease-out infinite;
+  --animate-pulse-ring-wave: pulse-ring-wave var(--duration) cubic-bezier(0.16, 1, 0.3, 1) infinite;
+  --animate-marquee: marquee var(--duration) infinite linear;
+  --animate-marquee-vertical: marquee-vertical var(--duration) linear infinite;
+}
+
+@keyframes ripple {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50% { transform: translate(-50%, -50%) scale(0.9); }
+}
+@keyframes pulse-ring {
+  0%, 100% { box-shadow: 0 0 0 0 var(--pulse-color); }
+  50% { box-shadow: 0 0 0 var(--distance) var(--pulse-color); }
+}
+@keyframes pulse-ring-wave {
+  0% { box-shadow: 0 0 0 0 var(--pulse-color); }
+  100% { box-shadow: 0 0 0 var(--distance) transparent; }
+}
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(calc(-100% - var(--gap))); }
+}
+@keyframes marquee-vertical {
+  from { transform: translateY(0); }
+  to { transform: translateY(calc(-100% - var(--gap))); }
+}
+
+html, body, #root { height: 100%; }
 body {
-  background: var(--color-bg);
-  color: var(--color-ink);
+  background: var(--bg);
+  color: var(--ink);
   font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+
+/* Leaflet: keep street tiles readable in dark mode without a second tile provider. */
+.dark .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9) saturate(0.6); }
+.dark .leaflet-container { background: #0b1020; }
+.leaflet-container { font-family: var(--font-sans); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
