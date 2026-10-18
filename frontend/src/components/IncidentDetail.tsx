@@ -65,11 +65,13 @@ function ReportItem({ report, onSplit, canSplit }: { report: Report; onSplit: ()
 
 interface Props {
   incident: Incident;
+  incidents: Map<string, Incident>;
   alerts: Map<string, Alert>;
   onClose: () => void;
+  onSelect: (id: string) => void;
 }
 
-export function IncidentDetail({ incident, alerts, onClose }: Props) {
+export function IncidentDetail({ incident, incidents, alerts, onClose, onSelect }: Props) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -150,6 +152,48 @@ export function IncidentDetail({ incident, alerts, onClose }: Props) {
       {error && <p className="mx-5 mb-3 rounded-md bg-rose-500/10 px-3 py-2 text-xs text-rose-200">{error}</p>}
 
       <div className="flex-1 overflow-y-auto">
+        {incident.combined_risk && (
+          <div className="mx-5 mb-3 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100" role="alert">
+            <span className="font-semibold">⚠ Linked risk:</span> {incident.combined_risk}
+          </div>
+        )}
+        {incident.briefing && incident.reasoned_at && (
+          <Section title="Responder briefing">
+            <ol className="space-y-1 text-sm">
+              {incident.briefing.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ol>
+            <p className="mt-2 text-[11px] text-mute">
+              System 2 · {clock.format(incident.reasoned_at * 1000)} · from the reports only, check before relaying
+            </p>
+          </Section>
+        )}
+        {incident.merge_suggestions.length > 0 && (
+          <Section title="Possibly the same event">
+            <ul className="space-y-2">
+              {incident.merge_suggestions.map((id) => {
+                const other = incidents.get(id);
+                return (
+                  <li key={id} className="flex items-center justify-between gap-2 text-sm">
+                    <button type="button" className="truncate text-left text-sky-300 hover:underline" onClick={() => onSelect(id)}>
+                      {other ? `${other.title} · ${other.report_count} reports` : id}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy || other?.status === "merged"}
+                      onClick={() => act(() => post(`/api/incidents/${id}/merge`, { into: incident.id }))}
+                      className="shrink-0 rounded-lg bg-white/10 px-2.5 py-1 text-xs font-medium disabled:opacity-40"
+                      title="Move that incident's reports into this one"
+                    >
+                      Merge here
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </Section>
+        )}
         <Section title="Situation">
           <dl className="grid grid-cols-[110px_1fr] gap-y-1 text-sm">
             <dt className="text-mute">Location</dt>
@@ -161,14 +205,12 @@ export function IncidentDetail({ incident, alerts, onClose }: Props) {
             <dt className="text-mute">Confidence</dt>
             <dd>{Math.round(incident.confidence * 100)}%</dd>
             <dt className="text-mute">Hazards</dt>
-            <dd>{incident.linked_hazards.length ? incident.linked_hazards.join(", ").replaceAll("_", " ") : "—"}</dd>
+            <dd>
+              {[...new Set([...incident.risk_hazards, ...incident.linked_hazards])].join(", ").replaceAll("_", " ") || "—"}
+            </dd>
           </dl>
-          {incident.briefing && (
-            <ul className="mt-3 list-disc space-y-0.5 pl-5 text-sm">
-              {incident.briefing.map((line) => (
-                <li key={line}>{line}</li>
-              ))}
-            </ul>
+          {incident.briefing && !incident.reasoned_at && (
+            <p className="mt-3 text-sm text-mute">{incident.briefing.join(" ")}</p>
           )}
         </Section>
 

@@ -75,7 +75,14 @@ export default function App() {
           <MapView incidents={ranked} selectedId={selectedId} onSelect={setSelectedId} />
           {selected && (
             <div className="absolute inset-0 z-[1000] sm:inset-y-3 sm:right-3 sm:left-auto sm:w-[460px]">
-              <IncidentDetail key={selected.id} incident={selected} alerts={state.alerts} onClose={() => setSelectedId(null)} />
+              <IncidentDetail
+                key={selected.id}
+                incident={selected}
+                incidents={state.incidents}
+                alerts={state.alerts}
+                onClose={() => setSelectedId(null)}
+                onSelect={setSelectedId}
+              />
             </div>
           )}
         </section>

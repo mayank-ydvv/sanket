@@ -45,6 +45,16 @@ export function Board({ incidents, alerts, selectedId, onSelect, now }: BoardPro
                   </Badge>
                   <Badge className={LANE_STYLE[incident.lane].className}>{LANE_STYLE[incident.lane].label}</Badge>
                   {incident.silent_sos && <Badge className="bg-rose-600/25 text-rose-100 ring-rose-500/50">silent SOS</Badge>}
+                  {incident.combined_risk && (
+                    <Badge className="bg-amber-500/20 text-amber-100 ring-amber-400/50" title={incident.combined_risk}>
+                      ⚠ linked risk
+                    </Badge>
+                  )}
+                  {incident.merge_suggestions.length > 0 && (
+                    <Badge className="bg-white/5 text-sky-200 ring-sky-400/30" title="the reasoning layer suggests a merge">
+                      merge?
+                    </Badge>
+                  )}
                   {incident.prank_suspected && <Badge className="bg-white/5 text-mute ring-white/10">prank?</Badge>}
                   {incident.needs_review && !incident.silent_sos && (
                     <Badge className="bg-yellow-400/15 text-yellow-200 ring-yellow-400/30">needs review</Badge>

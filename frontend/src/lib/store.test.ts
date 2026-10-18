@@ -23,6 +23,10 @@ const incident = (id: string, severity: number, first_seen: number, extra: Parti
   prank_suspected: false,
   needs_review: false,
   overrides: {},
+  combined_risk: null,
+  risk_hazards: [],
+  merge_suggestions: [],
+  reasoned_at: null,
   ...extra,
 });
 

@@ -60,6 +60,10 @@ export interface Incident {
   prank_suspected: boolean;
   needs_review: boolean;
   overrides: Record<string, string | number>;
+  combined_risk: string | null;
+  risk_hazards: string[];
+  merge_suggestions: string[];
+  reasoned_at: number | null;
 }
 
 export interface Alert {
