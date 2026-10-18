@@ -7,11 +7,13 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { useNow } from "@/hooks/useNow";
 import { ApiError, api } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 import { useLive } from "@/lib/live";
-import { waitingLabel } from "@/lib/store";
+import { incidentTitle, waitingLabel } from "@/lib/store";
 import type { Alert } from "@/types";
 
 function AlertRow({ alert, action }: { alert: Alert; action?: ReactNode }) {
+  const { t } = useI18n();
   const { state } = useLive();
   const now = useNow();
   const incident = state.incidents.get(alert.incident_id);
@@ -19,17 +21,17 @@ function AlertRow({ alert, action }: { alert: Alert; action?: ReactNode }) {
     <li className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5">
       <div className="min-w-0 flex-1">
         <Link to={`/app/incidents?focus=${alert.incident_id}`} className="truncate text-sm font-semibold hover:text-accent">
-          {incident?.title ?? alert.incident_id}
+          {incident ? incidentTitle(incident, t) : alert.incident_id}
         </Link>
         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-mute">
           <DepartmentBadge department={alert.department} />
-          <NeutralPill>Level {alert.level}</NeutralPill>
+          <NeutralPill>{t("alerts.level", { n: alert.level })}</NeutralPill>
           <span>→ {alert.contact}</span>
           <span>· {alert.triggered_by.replace("_", " ")}</span>
-          {alert.channel.endsWith(":failed") && <span className="text-danger">· delivery failed</span>}
+          {alert.channel.endsWith(":failed") && <span className="text-danger">· {t("alerts.failed")}</span>}
         </div>
       </div>
-      <span className="font-mono text-xs text-mute">{waitingLabel(alert.sent_at, now)} ago</span>
+      <span className="font-mono text-xs text-mute">{t("alerts.ago", { t: waitingLabel(alert.sent_at, now) })}</span>
       {action}
     </li>
   );
@@ -64,6 +66,7 @@ function Group({ title, subtitle, icon, alerts, empty, action }: {
 }
 
 export default function Alerts() {
+  const { t } = useI18n();
   const { state } = useLive();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -87,42 +90,39 @@ export default function Alerts() {
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6 lg:p-8">
       <BlurFade>
-        <p className="max-w-2xl text-sm text-mute">
-          Alerts go to the first contact on the department's ladder. If nobody acknowledges within 90 seconds, the next
-          contact is alerted automatically.
-        </p>
+        <p className="max-w-2xl text-sm text-mute">{t("alerts.intro")}</p>
       </BlurFade>
       {error && <p className="rounded-xl bg-danger/10 px-4 py-2.5 text-sm text-danger">{error}</p>}
       <BlurFade delay={0.05}>
         <Group
-          title="Waiting for acknowledgement"
-          subtitle="Escalates to the next contact after 90 s."
+          title={t("alerts.waiting")}
+          subtitle={t("alerts.waitingSub")}
           icon={<BellRing className="size-4 text-accent" />}
           alerts={waiting}
-          empty="Nothing waiting. All alerts are acknowledged."
+          empty={t("alerts.waitingEmpty")}
           action={(a) => (
             <Button size="sm" disabled={busy === a.id} onClick={() => acknowledge(a)}>
-              <Check className="size-3.5" /> Acknowledge
+              <Check className="size-3.5" /> {t("detail.ack")}
             </Button>
           )}
         />
       </BlurFade>
       <BlurFade delay={0.1}>
         <Group
-          title="Nobody acknowledged"
-          subtitle="Every contact on the ladder was alerted. Call the unit directly."
+          title={t("alerts.exhausted")}
+          subtitle={t("alerts.exhaustedSub")}
           icon={<CircleAlert className="size-4 text-danger" />}
           alerts={exhausted}
-          empty="No exhausted ladders."
+          empty={t("alerts.exhaustedEmpty")}
         />
       </BlurFade>
       <BlurFade delay={0.15}>
         <Group
-          title="History"
-          subtitle="Acknowledged, escalated or rerouted alerts."
+          title={t("alerts.history")}
+          subtitle={t("alerts.historySub")}
           icon={exhausted.length || history.length ? <History className="size-4" /> : <BellOff className="size-4" />}
           alerts={history.slice(0, 50)}
-          empty="No alert history yet."
+          empty={t("alerts.historyEmpty")}
         />
       </BlurFade>
     </div>

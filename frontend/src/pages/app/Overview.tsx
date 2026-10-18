@@ -8,10 +8,12 @@ import { NumberTicker } from "@/components/magicui/number-ticker";
 import { PulsatingButton } from "@/components/magicui/pulsating-button";
 import { DepartmentBadge, LaneBadge, SeverityChip, SeverityDot } from "@/components/ui/badges";
 import { Card, CardHeader } from "@/components/ui/Card";
+import { Translation } from "@/components/incidents/IncidentDetail";
 import { ApiError, api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { type Translate, useI18n } from "@/lib/i18n";
 import { useLive } from "@/lib/live";
-import { formatInr, liveAlertFor, rankIncidents, waitingLabel } from "@/lib/store";
+import { formatInr, incidentTitle, liveAlertFor, rankIncidents, reportCount, waitingLabel } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
 import { useNow } from "@/hooks/useNow";
 
@@ -38,6 +40,7 @@ function Kpi({ label, value, icon, tone }: { label: string; value: number; icon:
 }
 
 function DisasterPanel() {
+  const { t } = useI18n();
   const { state } = useLive();
   const { resolved } = useTheme();
   const [error, setError] = useState<string | null>(null);
@@ -49,12 +52,12 @@ function DisasterPanel() {
     try {
       await api("/simulate/disaster?n=500&seconds=10&scenario=flood", { method: "POST" });
     } catch (exc) {
-      setError(exc instanceof ApiError && exc.status === 409 ? "A run is already in progress." : "Could not start the simulation.");
+      setError(exc instanceof ApiError && exc.status === 409 ? t("sim.busy") : t("sim.failed"));
     }
   };
   return (
     <Card className="overflow-hidden">
-      <CardHeader title="Disaster mode" subtitle="500 simulated flood reports in 10 seconds, through the real pipeline." />
+      <CardHeader title={t("sim.title")} subtitle={t("sim.subtitle")} />
       <div className="flex flex-col items-center gap-5 p-6 sm:flex-row">
         <AnimatedCircularProgressBar
           value={pct}
@@ -65,26 +68,21 @@ function DisasterPanel() {
         <div className="flex-1 text-center sm:text-left">
           {sim?.total ? (
             <p className="text-sm text-ink-2">
-              <span className="font-mono font-semibold text-ink">{sim.decided}</span> of {sim.total} reports triaged
-              {sim.decided_s != null && (
-                <>
-                  {" "}in <span className="font-mono font-semibold text-ink">{sim.decided_s.toFixed(1)} s</span>
-                </>
-              )}
-              .
+              <span className="font-medium text-ink">{t("sim.progress", { decided: sim.decided, total: sim.total })}</span>
+              {sim.decided_s != null && <> {t("sim.took", { s: sim.decided_s.toFixed(1) })}</>}.
             </p>
           ) : (
-            <p className="text-sm text-ink-2">Watch a monsoon surge collapse into a dozen ranked incidents.</p>
+            <p className="text-sm text-ink-2">{t("sim.idle")}</p>
           )}
           <div className="mt-4 flex justify-center sm:justify-start">
             {running ? (
               <span className="inline-flex h-10 items-center gap-2 rounded-xl bg-surface-2 px-4 text-sm font-medium text-ink-2">
-                <CloudRain className="size-4 animate-pulse text-accent" /> Surge in progress…
+                <CloudRain className="size-4 animate-pulse text-accent" /> {t("sim.running")}
               </span>
             ) : (
               <PulsatingButton onClick={start} pulseColor="rgba(234, 88, 12, 0.4)" className="h-10 rounded-xl bg-accent px-5 text-sm font-semibold text-white">
                 <span className="inline-flex items-center gap-2">
-                  <CloudRain className="size-4" /> Start flood surge
+                  <CloudRain className="size-4" /> {t("sim.start")}
                 </span>
               </PulsatingButton>
             )}
@@ -96,12 +94,13 @@ function DisasterPanel() {
   );
 }
 
-function greeting(): string {
+function greeting(t: Translate): string {
   const hour = new Date().getHours();
-  return hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  return t(hour < 12 ? "overview.morning" : hour < 17 ? "overview.afternoon" : "overview.evening");
 }
 
 export default function Overview() {
+  const { t } = useI18n();
   const { user } = useAuth();
   const { state } = useLive();
   const now = useNow(5000);
@@ -119,32 +118,32 @@ export default function Overview() {
     <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6 lg:p-8">
       <BlurFade>
         <h2 className="font-display text-2xl font-bold tracking-tight">
-          {greeting()}, {user?.name.split(" ")[0]}
+          {greeting(t)}, {user?.name.split(" ")[0]}
         </h2>
-        <p className="mt-1 text-sm text-mute">Here's the situation right now.</p>
+        <p className="mt-1 text-sm text-mute">{t("overview.situation")}</p>
       </BlurFade>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <BlurFade delay={0.05}><Kpi label="Open incidents" value={open.length} icon={<Siren className="size-5" />} tone="bg-accent-soft text-accent" /></BlurFade>
-        <BlurFade delay={0.1}><Kpi label="Needs human review" value={review} icon={<Inbox className="size-5" />} tone="bg-yellow-500/15 text-yellow-600 dark:text-yellow-300" /></BlurFade>
-        <BlurFade delay={0.15}><Kpi label="Alerts awaiting ack" value={alerting} icon={<BellRing className="size-5" />} tone="bg-fuchsia-500/15 text-fuchsia-600 dark:text-fuchsia-300" /></BlurFade>
-        <BlurFade delay={0.2}><Kpi label="Reports received" value={state.reports.size} icon={<FileText className="size-5" />} tone="bg-live-soft text-live" /></BlurFade>
+        <BlurFade delay={0.05}><Kpi label={t("kpi.open")} value={open.length} icon={<Siren className="size-5" />} tone="bg-accent-soft text-accent" /></BlurFade>
+        <BlurFade delay={0.1}><Kpi label={t("kpi.review")} value={review} icon={<Inbox className="size-5" />} tone="bg-yellow-500/15 text-yellow-600 dark:text-yellow-300" /></BlurFade>
+        <BlurFade delay={0.15}><Kpi label={t("kpi.alerting")} value={alerting} icon={<BellRing className="size-5" />} tone="bg-fuchsia-500/15 text-fuchsia-600 dark:text-fuchsia-300" /></BlurFade>
+        <BlurFade delay={0.2}><Kpi label={t("kpi.reports")} value={state.reports.size} icon={<FileText className="size-5" />} tone="bg-live-soft text-live" /></BlurFade>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
         <BlurFade delay={0.1}>
           <Card>
             <CardHeader
-              title="Highest priority"
-              subtitle="Most severe first, then longest waiting."
+              title={t("priority.title")}
+              subtitle={t("priority.subtitle")}
               action={
                 <Link to="/app/incidents" className="inline-flex items-center gap-1 text-sm font-medium text-accent hover:underline">
-                  All incidents <ArrowRight className="size-4" />
+                  {t("priority.all")} <ArrowRight className="size-4" />
                 </Link>
               }
             />
             {open.length === 0 ? (
-              <p className="px-5 py-12 text-center text-sm text-mute">No open incidents. Start a flood surge to see Sanket at work.</p>
+              <p className="px-5 py-12 text-center text-sm text-mute">{t("priority.empty")}</p>
             ) : (
               <ul className="divide-y divide-line">
                 {open.slice(0, 6).map((incident) => (
@@ -152,16 +151,16 @@ export default function Overview() {
                     <Link to={`/app/incidents?focus=${incident.id}`} className="flex items-center gap-4 px-5 py-3.5 transition hover:bg-surface-2">
                       <SeverityChip severity={incident.severity} size="sm" />
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{incident.title}</p>
+                        <p className="truncate text-sm font-medium">{incidentTitle(incident, t)}</p>
                         <div className="mt-1 flex flex-wrap gap-1.5">
                           <DepartmentBadge department={incident.department} />
                           <LaneBadge lane={incident.lane} />
-                          {incident.combined_risk && <span className="text-[11px] font-medium text-accent">⚠ linked risk</span>}
+                          {incident.combined_risk && <span className="text-[11px] font-medium text-accent">{t("priority.linkedRisk")}</span>}
                         </div>
                       </div>
                       <div className="text-right text-xs text-mute">
                         <p className="font-mono">{waitingLabel(incident.first_seen, now)}</p>
-                        <p>{incident.report_count} reports</p>
+                        <p>{reportCount(incident.report_count, t)}</p>
                       </div>
                     </Link>
                   </li>
@@ -177,17 +176,17 @@ export default function Overview() {
           </BlurFade>
           <BlurFade delay={0.2}>
             <Card>
-              <CardHeader title="LLM cost" subtitle="List price for tokens used, vs every report sent to a large reasoning model." />
+              <CardHeader title={t("cost.title")} subtitle={t("cost.subtitle")} />
               <div className="grid grid-cols-2 gap-px bg-line">
                 <div className="bg-surface p-5">
-                  <p className="text-xs text-mute">Sanket</p>
+                  <p className="text-xs text-mute">{t("cost.sanket")}</p>
                   <p className="mt-1 font-mono text-2xl font-semibold text-good">{formatInr(cost?.sanket_inr ?? 0)}</p>
-                  <p className="mt-1 text-xs text-mute">{cost?.llm_calls ?? 0} LLM calls</p>
+                  <p className="mt-1 text-xs text-mute">{t("cost.calls", { n: cost?.llm_calls ?? 0 })}</p>
                 </div>
                 <div className="bg-surface p-5">
-                  <p className="text-xs text-mute">All to a large LLM</p>
+                  <p className="text-xs text-mute">{t("cost.counterfactual")}</p>
                   <p className="mt-1 font-mono text-2xl font-semibold text-danger">{formatInr(cost?.counterfactual_inr ?? 0)}</p>
-                  <p className="mt-1 text-xs text-mute">{cost && cost.counterfactual_inr > 0 ? `${cost.saved_pct.toFixed(1)}% saved` : "—"}</p>
+                  <p className="mt-1 text-xs text-mute">{cost && cost.counterfactual_inr > 0 ? t("cost.saved", { pct: cost.saved_pct.toFixed(1) }) : "—"}</p>
                 </div>
               </div>
             </Card>
@@ -197,18 +196,21 @@ export default function Overview() {
 
       <BlurFade delay={0.15}>
         <Card>
-          <CardHeader title="Live feed" subtitle="Newest reports from every channel." />
+          <CardHeader title={t("feed.title")} subtitle={t("feed.subtitle")} />
           {latest.length === 0 ? (
-            <p className="px-5 py-10 text-center text-sm text-mute">Waiting for reports…</p>
+            <p className="px-5 py-10 text-center text-sm text-mute">{t("feed.waiting")}</p>
           ) : (
             <ul className="divide-y divide-line">
               {latest.map((report) => (
                 <li key={report.id} className="flex items-center gap-3 px-5 py-3">
                   <SeverityDot severity={report.decision?.severity ?? 1} />
-                  <span className="w-16 shrink-0 text-[11px] uppercase tracking-wide text-mute">{report.channel}</span>
-                  <p className="min-w-0 flex-1 truncate text-sm">{report.raw_text || <em className="text-mute">silent call</em>}</p>
+                  <span className="w-16 shrink-0 text-[11px] uppercase tracking-wide text-mute">{t(`channel.${report.channel}`)}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm">{report.raw_text || <em className="text-mute">{t("silent.call")}</em>}</p>
+                    <Translation report={report} compact />
+                  </div>
                   {report.decision && <DepartmentBadge department={report.decision.department} />}
-                  {report.refining && <span className="text-[11px] text-live">re-checking…</span>}
+                  {report.refining && <span className="text-[11px] text-live">{t("feed.rechecking")}</span>}
                 </li>
               ))}
             </ul>

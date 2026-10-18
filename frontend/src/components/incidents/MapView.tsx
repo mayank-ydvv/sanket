@@ -6,9 +6,11 @@ import MarkerClusterGroup from "react-leaflet-cluster";
 import "react-leaflet-cluster/dist/assets/MarkerCluster.css";
 import "react-leaflet-cluster/dist/assets/MarkerCluster.Default.css";
 import { severityColor } from "@/components/ui/badges";
+import { useI18n } from "@/lib/i18n";
+import { incidentTitle, reportCount } from "@/lib/store";
 import type { Incident } from "@/types";
 
-const DEMO_CENTER: [number, number] = [28.5355, 77.391];
+const DEMO_CENTER: [number, number] = [13.04, 80.21]; // Chennai
 const iconCache = new Map<string, L.DivIcon>();
 
 function pinIcon(severity: number, selected: boolean): L.DivIcon {
@@ -62,10 +64,11 @@ export function MapView({
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
+  const { t } = useI18n();
   const located = useMemo(() => incidents.filter((i) => i.lat != null && i.lng != null), [incidents]);
   const selected = incidents.find((i) => i.id === selectedId);
   return (
-    <MapContainer center={DEMO_CENTER} zoom={12} className="h-full w-full" preferCanvas>
+    <MapContainer center={DEMO_CENTER} zoom={11} className="h-full w-full" preferCanvas>
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -76,11 +79,11 @@ export function MapView({
             key={incident.id}
             position={[incident.lat!, incident.lng!]}
             icon={pinIcon(incident.severity, incident.id === selectedId)}
-            alt={`${incident.severity}: ${incident.title}`}
+            alt={`${incident.severity}: ${incidentTitle(incident, t)}`}
             eventHandlers={{ click: () => onSelect(incident.id) }}
           >
             <Tooltip direction="top" offset={[0, -12]}>
-              {incident.title} · {incident.report_count} report{incident.report_count === 1 ? "" : "s"}
+              {incidentTitle(incident, t)} · {reportCount(incident.report_count, t)}
             </Tooltip>
           </Marker>
         ))}
