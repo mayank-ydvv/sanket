@@ -210,3 +210,41 @@ Live observation: right after a 500-report surge the free tiers were exhausted (
 daily quota, OpenRouter's upstream limit), so System 2 caught up over the following hours
 mostly via Groq. With paid or self-hosted capacity it would keep pace; on free tiers,
 briefings arrive late in a big surge.
+
+## Benchmark (held-out test set, five approaches)
+
+`python -m scripts.benchmark` (from `backend/`, real API keys) streams the 250 held-out test
+reports (incl. 50 hidden during development) at 25/s through each approach and writes
+`backend/data/benchmark.json` and [`docs/benchmark.md`](docs/benchmark.md). The app's
+**Benchmark** section charts it.
+
+| Approach | Triage acc | Hidden 50 | Recall | ₹ / 1,000 | LLM calls |
+|---|---|---|---|---|---|
+| keyword rules | 58.4% | 60% | 0.83 | 0 | 0 |
+| local only | 52.8% | 54% | 0.93 | 0 | 0 |
+| **Sanket hybrid** | **98.0%** | **98%** | **1.00** | **₹2.49** | 12 |
+| fast LLM only | 97.2% | 96% | 0.99 | ₹3.13 | 20 |
+| reasoning LLM only (gpt-oss-120b) | 92.0% | 98% | 0.97 | ₹22.69 | 46 |
+
+Honest reading: the hybrid is the most accurate and the cheapest LLM approach, but its saving
+over "fast LLM only" is small (≈ 20%) because the local model is confident (≥ 0.8) on only 5% of
+held-out phrasings, so ~90% of reports still reach the LLM (see the gate table in the report).
+Keyword rules beat the local classifier on its own. Latencies are dominated by free-tier
+throttling. Pure-LLM approaches re-ask unanswered reports after quotas refill (the hybrid
+never needs to, since its local answer stands in).
+
+## Web app
+
+React + Vite + Tailwind with a light/dark theme (remembered; follows the OS by default) and
+Magic UI components (Blur Fade, Morphing Text, Animated Beam, Ripple, Magic Card, Bento Grid,
+Pulsating Button, Dotted Map, Number Ticker, Animated List, Circular Progress, Flickering Grid,
+Marquee, Hyper Text), adapted for Vite in `frontend/src/components/magicui/`.
+
+- `/`: landing page (hero, live-feed demo, how it works, features, measured results).
+- `/signup`, `/login`: dispatcher accounts. Passwords are scrypt-hashed in SQLite; sessions
+  are HttpOnly HMAC-signed cookies; 5 failed logins per email per 5 min are throttled.
+- `/app`: Overview (KPIs, disaster mode, live feed, cost), Incidents (ranked list + map +
+  tabbed detail drawer), Alerts (waiting / no-ack / history), Benchmark & cost.
+
+Citizen intake (`POST /reports`, Twilio webhooks) stays public; every dispatcher route and the
+WebSocket require a session. `scripts/post_reports.py --email … --password …` logs in first.

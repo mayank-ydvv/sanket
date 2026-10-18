@@ -1,0 +1,645 @@
+{
+  "run_at": "2026-10-18 14:40 IST",
+  "n": 250,
+  "reports_per_second": 25,
+  "approaches": [
+    {
+      "approach": "keyword rules",
+      "triage_acc": 0.584,
+      "triage_acc_hidden50": 0.6,
+      "emergency": {
+        "precision": 0.7183908045977011,
+        "recall": 0.8333333333333334,
+        "f1": 0.7716049382716049
+      },
+      "department_acc": 0.624,
+      "severity_mae": 0.872,
+      "silent_sos_caught": "0/4",
+      "unanswered": 0,
+      "per_language": {
+        "bn": {
+          "n": 44,
+          "triage_acc": 0.8409090909090909,
+          "emergency_acc": 0.8636363636363636,
+          "department_acc": 0.7727272727272727
+        },
+        "en": {
+          "n": 57,
+          "triage_acc": 0.5789473684210527,
+          "emergency_acc": 0.6491228070175439,
+          "department_acc": 0.6491228070175439
+        },
+        "hi": {
+          "n": 49,
+          "triage_acc": 0.673469387755102,
+          "emergency_acc": 0.7755102040816326,
+          "department_acc": 0.7755102040816326
+        },
+        "hinglish": {
+          "n": 52,
+          "triage_acc": 0.38461538461538464,
+          "emergency_acc": 0.6538461538461539,
+          "department_acc": 0.40384615384615385
+        },
+        "ta": {
+          "n": 48,
+          "triage_acc": 0.4791666666666667,
+          "emergency_acc": 0.6041666666666666,
+          "department_acc": 0.5416666666666666
+        }
+      },
+      "department_confusion": {
+        "labels": [
+          "fire",
+          "police",
+          "medical",
+          "disaster",
+          "utilities",
+          "none"
+        ],
+        "matrix": [
+          [
+            33,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            4,
+            11,
+            5,
+            5,
+            0,
+            30
+          ],
+          [
+            2,
+            1,
+            23,
+            0,
+            0,
+            5
+          ],
+          [
+            2,
+            0,
+            2,
+            28,
+            0,
+            4
+          ],
+          [
+            1,
+            0,
+            5,
+            8,
+            29,
+            5
+          ],
+          [
+            8,
+            3,
+            1,
+            3,
+            0,
+            32
+          ]
+        ]
+      },
+      "latency_ms": {
+        "median": 0.08200050797313452,
+        "p95": 0.14946440496714786
+      },
+      "llm_calls": 0,
+      "llm_failures": 0,
+      "models": {},
+      "tokens": {},
+      "cost_inr": 0.0,
+      "cost_per_1000_inr": 0.0,
+      "notes": []
+    },
+    {
+      "approach": "local only",
+      "triage_acc": 0.528,
+      "triage_acc_hidden50": 0.54,
+      "emergency": {
+        "precision": 0.7567567567567568,
+        "recall": 0.9333333333333333,
+        "f1": 0.835820895522388
+      },
+      "department_acc": 0.516,
+      "severity_mae": 0.856,
+      "silent_sos_caught": "0/4",
+      "unanswered": 0,
+      "per_language": {
+        "bn": {
+          "n": 44,
+          "triage_acc": 0.5227272727272727,
+          "emergency_acc": 0.75,
+          "department_acc": 0.7045454545454546
+        },
+        "en": {
+          "n": 57,
+          "triage_acc": 0.40350877192982454,
+          "emergency_acc": 0.7368421052631579,
+          "department_acc": 0.47368421052631576
+        },
+        "hi": {
+          "n": 49,
+          "triage_acc": 0.5714285714285714,
+          "emergency_acc": 0.8775510204081632,
+          "department_acc": 0.3469387755102041
+        },
+        "hinglish": {
+          "n": 52,
+          "triage_acc": 0.5769230769230769,
+          "emergency_acc": 0.7884615384615384,
+          "department_acc": 0.5576923076923077
+        },
+        "ta": {
+          "n": 48,
+          "triage_acc": 0.5833333333333334,
+          "emergency_acc": 0.75,
+          "department_acc": 0.5208333333333334
+        }
+      },
+      "department_confusion": {
+        "labels": [
+          "fire",
+          "police",
+          "medical",
+          "disaster",
+          "utilities",
+          "none"
+        ],
+        "matrix": [
+          [
+            15,
+            10,
+            2,
+            1,
+            5,
+            0
+          ],
+          [
+            5,
+            29,
+            7,
+            5,
+            6,
+            3
+          ],
+          [
+            0,
+            5,
+            21,
+            1,
+            2,
+            2
+          ],
+          [
+            7,
+            2,
+            2,
+            11,
+            14,
+            0
+          ],
+          [
+            7,
+            2,
+            3,
+            6,
+            30,
+            0
+          ],
+          [
+            1,
+            15,
+            2,
+            0,
+            6,
+            23
+          ]
+        ]
+      },
+      "latency_ms": {
+        "median": 5.782479500339832,
+        "p95": 10.914927600242663
+      },
+      "llm_calls": 0,
+      "llm_failures": 0,
+      "models": {},
+      "tokens": {},
+      "cost_inr": 0.0,
+      "cost_per_1000_inr": 0.0,
+      "notes": []
+    },
+    {
+      "approach": "Sanket hybrid",
+      "triage_acc": 0.98,
+      "triage_acc_hidden50": 0.98,
+      "emergency": {
+        "precision": 0.9868421052631579,
+        "recall": 1.0,
+        "f1": 0.9933774834437086
+      },
+      "department_acc": 0.94,
+      "severity_mae": 0.54,
+      "silent_sos_caught": "4/4",
+      "unanswered": 0,
+      "per_language": {
+        "bn": {
+          "n": 44,
+          "triage_acc": 1.0,
+          "emergency_acc": 1.0,
+          "department_acc": 0.9772727272727273
+        },
+        "en": {
+          "n": 57,
+          "triage_acc": 0.9824561403508771,
+          "emergency_acc": 0.9824561403508771,
+          "department_acc": 0.9649122807017544
+        },
+        "hi": {
+          "n": 49,
+          "triage_acc": 0.9387755102040817,
+          "emergency_acc": 1.0,
+          "department_acc": 0.8367346938775511
+        },
+        "hinglish": {
+          "n": 52,
+          "triage_acc": 0.9807692307692307,
+          "emergency_acc": 0.9807692307692307,
+          "department_acc": 1.0
+        },
+        "ta": {
+          "n": 48,
+          "triage_acc": 1.0,
+          "emergency_acc": 1.0,
+          "department_acc": 0.9166666666666666
+        }
+      },
+      "department_confusion": {
+        "labels": [
+          "fire",
+          "police",
+          "medical",
+          "disaster",
+          "utilities",
+          "none"
+        ],
+        "matrix": [
+          [
+            33,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            50,
+            0,
+            0,
+            0,
+            5
+          ],
+          [
+            0,
+            0,
+            31,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            29,
+            4,
+            3
+          ],
+          [
+            3,
+            0,
+            0,
+            0,
+            45,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            47
+          ]
+        ]
+      },
+      "latency_ms": {
+        "median": 6561.483167002734,
+        "p95": 61573.37823285125
+      },
+      "llm_calls": 12,
+      "llm_failures": 1,
+      "models": {
+        "groq/qwen/qwen3.8-27b": 3,
+        "gemini/gemini-3.5-flash-lite": 9
+      },
+      "tokens": {
+        "input": 16232,
+        "output": 12434
+      },
+      "cost_inr": 0.6233976000000001,
+      "cost_per_1000_inr": 2.4935904000000004,
+      "notes": [
+        "9% of reports decided without an LLM call (local model + rules)",
+        "Latency here is to the *final* decision. Every report is on the board with its local decision within ~10 ms; uncertain ones are revised when the LLM answers."
+      ]
+    },
+    {
+      "approach": "fast LLM only",
+      "triage_acc": 0.972,
+      "triage_acc_hidden50": 0.96,
+      "emergency": {
+        "precision": 0.9867549668874173,
+        "recall": 0.9933333333333333,
+        "f1": 0.9900332225913622
+      },
+      "department_acc": 0.924,
+      "severity_mae": 0.52,
+      "silent_sos_caught": "4/4",
+      "unanswered": 0,
+      "per_language": {
+        "bn": {
+          "n": 44,
+          "triage_acc": 1.0,
+          "emergency_acc": 1.0,
+          "department_acc": 0.9318181818181818
+        },
+        "en": {
+          "n": 57,
+          "triage_acc": 0.9649122807017544,
+          "emergency_acc": 0.9824561403508771,
+          "department_acc": 0.9473684210526315
+        },
+        "hi": {
+          "n": 49,
+          "triage_acc": 0.9387755102040817,
+          "emergency_acc": 1.0,
+          "department_acc": 0.8367346938775511
+        },
+        "hinglish": {
+          "n": 52,
+          "triage_acc": 0.9615384615384616,
+          "emergency_acc": 0.9615384615384616,
+          "department_acc": 1.0
+        },
+        "ta": {
+          "n": 48,
+          "triage_acc": 1.0,
+          "emergency_acc": 1.0,
+          "department_acc": 0.8958333333333334
+        }
+      },
+      "department_confusion": {
+        "labels": [
+          "fire",
+          "police",
+          "medical",
+          "disaster",
+          "utilities",
+          "none"
+        ],
+        "matrix": [
+          [
+            33,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            49,
+            0,
+            0,
+            0,
+            6
+          ],
+          [
+            0,
+            0,
+            31,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            27,
+            2,
+            7
+          ],
+          [
+            3,
+            0,
+            0,
+            1,
+            44,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            47
+          ]
+        ]
+      },
+      "latency_ms": {
+        "median": 62830.29925000301,
+        "p95": 104555.11412134802
+      },
+      "llm_calls": 20,
+      "llm_failures": 4,
+      "models": {
+        "groq/qwen/qwen3.8-27b": 6,
+        "gemini/gemini-3.5-flash-lite": 14
+      },
+      "tokens": {
+        "input": 22219,
+        "output": 15166
+      },
+      "cost_inr": 0.7825767600000001,
+      "cost_per_1000_inr": 3.130307040000001,
+      "notes": []
+    },
+    {
+      "approach": "reasoning LLM only",
+      "triage_acc": 0.92,
+      "triage_acc_hidden50": 0.98,
+      "emergency": {
+        "precision": 0.9477124183006536,
+        "recall": 0.9666666666666667,
+        "f1": 0.9570957095709571
+      },
+      "department_acc": 0.848,
+      "severity_mae": 0.42,
+      "silent_sos_caught": "3/4",
+      "unanswered": 0,
+      "per_language": {
+        "bn": {
+          "n": 44,
+          "triage_acc": 1.0,
+          "emergency_acc": 1.0,
+          "department_acc": 0.9090909090909091
+        },
+        "en": {
+          "n": 57,
+          "triage_acc": 0.9122807017543859,
+          "emergency_acc": 0.9298245614035088,
+          "department_acc": 0.8245614035087719
+        },
+        "hi": {
+          "n": 49,
+          "triage_acc": 0.9183673469387755,
+          "emergency_acc": 1.0,
+          "department_acc": 0.8163265306122449
+        },
+        "hinglish": {
+          "n": 52,
+          "triage_acc": 0.8269230769230769,
+          "emergency_acc": 0.8653846153846154,
+          "department_acc": 0.8846153846153846
+        },
+        "ta": {
+          "n": 48,
+          "triage_acc": 0.9583333333333334,
+          "emergency_acc": 0.9583333333333334,
+          "department_acc": 0.8125
+        }
+      },
+      "department_confusion": {
+        "labels": [
+          "fire",
+          "police",
+          "medical",
+          "disaster",
+          "utilities",
+          "none"
+        ],
+        "matrix": [
+          [
+            32,
+            0,
+            0,
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            34,
+            0,
+            0,
+            0,
+            21
+          ],
+          [
+            0,
+            0,
+            31,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            1,
+            26,
+            0,
+            9
+          ],
+          [
+            4,
+            0,
+            0,
+            1,
+            43,
+            0
+          ],
+          [
+            1,
+            0,
+            0,
+            0,
+            0,
+            46
+          ]
+        ]
+      },
+      "latency_ms": {
+        "median": 300838.0552500021,
+        "p95": 596104.0407481028
+      },
+      "llm_calls": 46,
+      "llm_failures": 19,
+      "models": {
+        "groq/openai/gpt-oss-120b": 32,
+        "gemini/gemini-3.5-flash": 14
+      },
+      "tokens": {
+        "input": 34428,
+        "output": 61637
+      },
+      "cost_inr": 5.6731164000000005,
+      "cost_per_1000_inr": 22.692465600000002,
+      "notes": []
+    }
+  ],
+  "local_gate_curve": [
+    {
+      "gate": 0.5,
+      "coverage": 0.476,
+      "triage_acc_on_covered": 0.6974789915966386
+    },
+    {
+      "gate": 0.6,
+      "coverage": 0.328,
+      "triage_acc_on_covered": 0.7804878048780488
+    },
+    {
+      "gate": 0.7,
+      "coverage": 0.164,
+      "triage_acc_on_covered": 0.9024390243902439
+    },
+    {
+      "gate": 0.8,
+      "coverage": 0.052,
+      "triage_acc_on_covered": 1.0
+    },
+    {
+      "gate": 0.9,
+      "coverage": 0.0,
+      "triage_acc_on_covered": 0.0
+    }
+  ],
+  "notes": [
+    "Reasoning LLM only uses openai/gpt-oss-120b (a reasoning model; gemini-3.5-flash as fallback) in batches of 10 to fit free-tier limits; one report per call would cost and wait more.",
+    "Each LLM approach starts after a 65s pause and may wait up to 60s for free-tier quota, so its latency includes throttling, as it would in a real surge on free tiers. LLM-only approaches re-ask unanswered reports after quotas refill (no fallback of their own); the hybrid never needs to, because its local answer stands in.",
+    "Keyword rules, local only, fast LLM only and reasoning LLM only run without the safety rules; the hybrid includes them, as Sanket does in production."
+  ]
+}

@@ -1,5 +1,7 @@
 """Application settings, loaded from the environment and ``sanket/.env``."""
 
+import hashlib
+import hmac
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -18,6 +20,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ROOT / ".env", extra="ignore")
 
     caller_salt: str = Field(min_length=16)
+    # Dispatcher accounts. Without SESSION_SECRET, one is derived from CALLER_SALT.
+    session_secret: str | None = Field(None, min_length=16)
+    session_ttl_s: float = Field(7 * 24 * 3600, gt=0)
+    cookie_secure: bool = False  # set true when served over https
+    auth_required: bool = True
     db_path: Path = Path("backend/sanket.db")
     local_model_path: Path = Path("backend/artifacts/local_v1.joblib")
     cors_origins: list[str] = ["http://localhost:5190"]
@@ -68,6 +75,7 @@ class Settings(BaseSettings):
         "gemini-3.5-flash-lite": Price(input=0.10, output=0.40),
         "gemini-3.5-flash": Price(input=0.30, output=2.50),
         "google/gemma-4-31b-it:free": Price(input=0.0, output=0.0),
+        "openai/gpt-oss-120b": Price(input=0.15, output=0.60),
     }
     counterfactual_price: Price = Price(input=2.50, output=15.00)
     counterfactual_input_tokens: int = 1550  # full decision prompt + one report
@@ -134,6 +142,13 @@ class Settings(BaseSettings):
     @classmethod
     def _resolve_path(cls, value: Path) -> Path:
         return value if value.is_absolute() else ROOT / value
+
+
+def session_secret(settings: Settings) -> str:
+    """The configured secret, or a stable one derived from CALLER_SALT (never the salt itself)."""
+    if settings.session_secret:
+        return settings.session_secret
+    return hmac.new(settings.caller_salt.encode(), b"sanket-session-v1", hashlib.sha256).hexdigest()
 
 
 @lru_cache

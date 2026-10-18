@@ -9,7 +9,8 @@ import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app import incidents_api, simulate_api, ws
+from app import auth_api, benchmark_api, incidents_api, simulate_api, ws
+from app.auth import LoginThrottle
 from app.cost import CostMeter
 from app.simulate import SimulationRunner
 from app.alerts.senders import AlertSender, MockSender, TwilioSmsSender
@@ -174,6 +175,7 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
         app.state.triage = triage
         intake = Intake(db, worker, cfg.caller_salt)
         app.state.intake = intake
+        app.state.login_throttle = LoginThrottle()
         app.state.simulation = SimulationRunner(intake, broadcaster, lambda: worker.processed)
         cost = CostMeter(
             [c.stats for c in (llm.chain if llm else None, reasoning_chain) if c is not None],
@@ -212,7 +214,7 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/stats")
+    @app.get("/stats", dependencies=[auth_api.require_user])
     async def stats() -> dict[str, object]:
         llm = app.state.llm
         return {
@@ -230,10 +232,13 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
             "cost": app.state.cost.snapshot().model_dump(),
         }
 
-    app.include_router(reports.router)
-    app.include_router(twilio.router)
-    app.include_router(simulate_api.router)
-    app.include_router(incidents_api.router)
-    app.include_router(incidents_api.alerts_router)
+    protected = [auth_api.require_user]
+    app.include_router(auth_api.router)
+    app.include_router(reports.router)  # POST /reports is public citizen intake; GET needs login
+    app.include_router(twilio.router)  # authenticated by Twilio signature instead
+    app.include_router(simulate_api.router, dependencies=protected)
+    app.include_router(benchmark_api.router, dependencies=protected)
+    app.include_router(incidents_api.router, dependencies=protected)
+    app.include_router(incidents_api.alerts_router, dependencies=protected)
     app.include_router(ws.router)
     return app
