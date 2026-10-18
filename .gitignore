@@ -11,3 +11,4 @@ dist/
 backend/artifacts/
 .DS_Store
 *.tsbuildinfo
+backend/backups/
