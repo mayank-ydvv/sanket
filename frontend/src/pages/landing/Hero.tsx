@@ -1,4 +1,4 @@
-import { ArrowRight, Radio } from "lucide-react";
+import { ArrowRight, Languages, Radio } from "lucide-react";
 import { useNavigate } from "react-router";
 import { AnimatedList } from "@/components/magicui/animated-list";
 import { BlurFade } from "@/components/magicui/blur-fade";
@@ -6,25 +6,34 @@ import { FlickeringGrid } from "@/components/magicui/flickering-grid";
 import { MorphingText } from "@/components/magicui/morphing-text";
 import { PulsatingButton } from "@/components/magicui/pulsating-button";
 import { DepartmentBadge, SeverityDot } from "@/components/ui/badges";
+import { useI18n } from "@/lib/i18n";
 import { useTheme } from "@/lib/theme";
+import { cn } from "@/lib/utils";
 import { HERO_PHRASES, SAMPLE_REPORTS } from "./samples";
 
-function FeedItem({ text, language, department, severity }: (typeof SAMPLE_REPORTS)[number]) {
+function FeedItem({ text, english, language, department, severity }: (typeof SAMPLE_REPORTS)[number]) {
+  const { t } = useI18n();
   return (
     <figure className="w-full rounded-xl border border-line bg-surface p-3.5 shadow-card transition hover:border-line-strong">
       <div className="flex items-center justify-between gap-3 text-[11px] text-mute">
         <span className="inline-flex items-center gap-1.5">
-          <SeverityDot severity={severity} /> {language}
+          <SeverityDot severity={severity} /> {t(language)}
         </span>
         <DepartmentBadge department={department} />
       </div>
       <p className="mt-2 text-sm leading-snug text-ink">{text}</p>
+      {english && (
+        <p className="mt-1.5 flex gap-1.5 text-xs leading-snug text-mute" lang="en">
+          <Languages className="mt-px size-3 shrink-0" aria-hidden /> {english}
+        </p>
+      )}
     </figure>
   );
 }
 
 export function Hero() {
   const navigate = useNavigate();
+  const { t, lang } = useI18n();
   const { resolved } = useTheme();
   return (
     <section className="relative overflow-hidden">
@@ -40,14 +49,21 @@ export function Hero() {
         <div>
           <BlurFade delay={0.05}>
             <span className="inline-flex items-center gap-2 rounded-full border border-accent/30 bg-accent-soft px-3 py-1 text-xs font-medium text-accent-ink">
-              <Radio className="size-3.5" /> AI emergency triage · built for India
+              <Radio className="size-3.5" /> {t("hero.badge")}
             </span>
           </BlurFade>
           <BlurFade delay={0.15}>
-            <h1 className="mt-6 font-display text-4xl font-extrabold leading-[1.08] tracking-tight sm:text-5xl lg:text-6xl">
-              When the lines flood,
+            <h1
+              className={cn(
+                "mt-6 font-display font-extrabold tracking-tight",
+                lang === "ta" ? "text-3xl leading-[1.25] sm:text-4xl lg:text-[2.75rem]" : "text-4xl leading-[1.08] sm:text-5xl lg:text-6xl",
+              )}
+            >
+              {t("hero.line1")}
               <br />
-              Sanket finds the <span className="text-accent">signal</span>.
+              {t("hero.line2a")}
+              <span className="text-accent">{t("hero.line2b")}</span>
+              {t("hero.line2c")}
             </h1>
           </BlurFade>
           <BlurFade delay={0.25}>
@@ -56,11 +72,7 @@ export function Hero() {
             </div>
           </BlurFade>
           <BlurFade delay={0.35}>
-            <p className="mt-4 max-w-xl text-lg leading-relaxed text-ink-2">
-              Calls, SMS and WhatsApp in any Indian language become a short, ranked list of real incidents, merged,
-              routed to the right team and dispatched in seconds, at a fraction of the cost of sending everything to a
-              large LLM.
-            </p>
+            <p className="mt-4 max-w-xl text-lg leading-relaxed text-ink-2">{t("hero.body")}</p>
           </BlurFade>
           <BlurFade delay={0.45}>
             <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -70,11 +82,11 @@ export function Hero() {
                 className="h-12 rounded-xl bg-accent px-6 text-base font-semibold text-white"
               >
                 <span className="inline-flex items-center gap-2">
-                  Open the control room <ArrowRight className="size-4" />
+                  {t("hero.cta")} <ArrowRight className="size-4" />
                 </span>
               </PulsatingButton>
               <a href="#how" className="inline-flex h-12 items-center rounded-xl px-5 text-sm font-medium text-ink-2 transition hover:text-ink">
-                See how it works
+                {t("hero.see")}
               </a>
             </div>
           </BlurFade>
@@ -85,9 +97,9 @@ export function Hero() {
             <div className="absolute -inset-6 -z-10 rounded-[2rem] bg-gradient-to-br from-accent/15 via-transparent to-live/15 blur-2xl" />
             <div className="rounded-3xl border border-line bg-surface-2/80 p-4 shadow-card backdrop-blur">
               <div className="mb-3 flex items-center justify-between px-1">
-                <p className="text-sm font-semibold">Incoming reports</p>
+                <p className="text-sm font-semibold">{t("hero.incoming")}</p>
                 <span className="inline-flex items-center gap-1.5 text-xs text-mute">
-                  <span className="size-2 animate-pulse rounded-full bg-good" /> live
+                  <span className="size-2 animate-pulse rounded-full bg-good" /> {t("hero.live")}
                 </span>
               </div>
               <div className="relative h-[380px] overflow-hidden">

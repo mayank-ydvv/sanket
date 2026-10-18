@@ -3,6 +3,8 @@ import { forwardRef, type ReactNode, useRef } from "react";
 import { AnimatedBeam } from "@/components/magicui/animated-beam";
 import { BlurFade } from "@/components/magicui/blur-fade";
 import { Ripple } from "@/components/magicui/ripple";
+import { useI18n } from "@/lib/i18n";
+import type { MessageKey } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 
 const Node = forwardRef<HTMLDivElement, { children: ReactNode; label: string; className?: string }>(function Node(
@@ -22,38 +24,39 @@ const Node = forwardRef<HTMLDivElement, { children: ReactNode; label: string; cl
   );
 });
 
-const STEPS = [
-  { title: "Understand", text: "A local multilingual model reads every report instantly; only uncertain ones go to a fast LLM, in batches." },
-  { title: "Merge", text: "Reports about the same event, in any language, collapse into one incident on a live map." },
-  { title: "Dispatch", text: "The right department is alerted; unacknowledged alerts escalate after 90 seconds." },
+const STEPS: { title: MessageKey; text: MessageKey }[] = [
+  { title: "how.understand", text: "how.understandText" },
+  { title: "how.merge", text: "how.mergeText" },
+  { title: "how.dispatch", text: "how.dispatchText" },
 ];
 
 export function HowItWorks() {
+  const { t } = useI18n();
   const container = useRef<HTMLDivElement>(null);
   const inputs = [useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null)];
   const hub = useRef<HTMLDivElement>(null);
   const outputs = [useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null)];
   const inputNodes = [
-    { label: "Call", icon: <Phone className="size-5" /> },
-    { label: "SMS", icon: <MessageSquare className="size-5" /> },
-    { label: "WhatsApp", icon: <MessageCircle className="size-5" /> },
-    { label: "Web", icon: <Globe className="size-5" /> },
+    { label: t("how.call"), icon: <Phone className="size-5" /> },
+    { label: t("how.sms"), icon: <MessageSquare className="size-5" /> },
+    { label: t("how.whatsapp"), icon: <MessageCircle className="size-5" /> },
+    { label: t("how.web"), icon: <Globe className="size-5" /> },
   ];
   const outputNodes = [
-    { label: "Fire", icon: <Flame className="size-5 text-orange-500" /> },
-    { label: "Police", icon: <Shield className="size-5 text-blue-500" /> },
-    { label: "Medical", icon: <Ambulance className="size-5 text-rose-500" /> },
-    { label: "Disaster", icon: <CloudRain className="size-5 text-violet-500" /> },
-    { label: "Utilities", icon: <Zap className="size-5 text-amber-500" /> },
+    { label: t("dept.fire"), icon: <Flame className="size-5 text-orange-500" /> },
+    { label: t("dept.police"), icon: <Shield className="size-5 text-blue-500" /> },
+    { label: t("dept.medical"), icon: <Ambulance className="size-5 text-rose-500" /> },
+    { label: t("dept.disaster"), icon: <CloudRain className="size-5 text-violet-500" /> },
+    { label: t("dept.utilities"), icon: <Zap className="size-5 text-amber-500" /> },
   ];
 
   return (
     <section id="how" className="scroll-mt-20 border-y border-line bg-surface/60">
       <div className="mx-auto max-w-6xl px-4 py-24 sm:px-6">
         <BlurFade inView>
-          <p className="text-sm font-semibold uppercase tracking-widest text-accent">How it works</p>
+          <p className="text-sm font-semibold uppercase tracking-widest text-accent">{t("land.how")}</p>
           <h2 className="mt-3 max-w-2xl font-display text-3xl font-bold tracking-tight sm:text-4xl">
-            Every channel in. One ranked list out.
+            {t("how.title")}
           </h2>
         </BlurFade>
 
@@ -93,8 +96,8 @@ export function HowItWorks() {
             <BlurFade key={step.title} inView delay={0.1 * i}>
               <div className="rounded-2xl border border-line bg-surface p-6">
                 <span className="font-mono text-sm font-semibold text-accent">0{i + 1}</span>
-                <h3 className="mt-2 font-display text-lg font-semibold">{step.title}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-ink-2">{step.text}</p>
+                <h3 className="mt-2 font-display text-lg font-semibold">{t(step.title)}</h3>
+                <p className="mt-2 text-sm leading-relaxed text-ink-2">{t(step.text)}</p>
               </div>
             </BlurFade>
           ))}
