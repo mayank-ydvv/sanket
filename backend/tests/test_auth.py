@@ -64,7 +64,7 @@ def test_failed_logins_are_throttled(client: TestClient) -> None:
 def test_dispatcher_routes_need_login_but_citizen_intake_does_not(client: TestClient) -> None:
     for path in ("/incidents", "/alerts", "/reports", "/stats", "/benchmark", "/simulate/status"):
         assert client.get(path).status_code == 401, path
-    assert client.post("/reports", json={"text": "aag lagi hai Sector 18"}).status_code == 202
+    assert client.post("/reports", json={"text": "aag lagi hai Marina beach"}).status_code == 202
     assert client.get("/health").status_code == 200
     client.post("/auth/signup", json=ALICE)
     assert client.get("/incidents").status_code == 200
@@ -76,5 +76,5 @@ def test_websocket_needs_login(client: TestClient) -> None:
     assert closed.value.code == 4401
     client.post("/auth/signup", json=ALICE)
     with client.websocket_connect("/ws") as ws:
-        client.post("/reports", json={"text": "aag lagi hai Sector 18"})
+        client.post("/reports", json={"text": "aag lagi hai Marina beach"})
         assert ws.receive_json()["type"] == "batch"

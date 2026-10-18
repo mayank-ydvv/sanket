@@ -36,6 +36,7 @@ from app.corpus import (
     HardCase,
     Template,
     add_typos,
+    spoken_place,
 )
 from scripts.dataset import TEST_PATH, TRAIN_PATH, Category, LabeledReport
 
@@ -98,7 +99,7 @@ def render(
             severity = min(5, severity + 1)
     if "{loc}" in text:
         vague = rng.random() < P_VAGUE_LOCATION
-        location = rng.choice(VAGUE_LOCATIONS[language] if vague else LOCATIONS)
+        location = rng.choice(VAGUE_LOCATIONS[language]) if vague else spoken_place(rng.choice(LOCATIONS), language, rng)
         text = text.replace("{loc}", location)
     if category == "emergency":
         if rng.random() < P_PANIC:

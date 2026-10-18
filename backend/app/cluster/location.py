@@ -1,7 +1,9 @@
-"""Location normalisation, extraction and the demo-district gazetteer (Noida).
+"""Location normalisation, extraction and the demo-city gazetteer (Chennai).
 
 The gazetteer lets known demo places resolve offline with no network call;
-anything else goes to the geocoder's cache and then Nominatim. Coordinates are
+anything else goes to the geocoder's cache and then Nominatim. Every place has
+its Tamil name too, matched as a word prefix because Tamil attaches case
+endings to the noun ("முடிச்சூரில்" = "in Mudichur"). Coordinates are
 approximate and only used for the synthetic demo.
 """
 
@@ -14,86 +16,84 @@ class Place(NamedTuple):
     name: str
     lat: float
     lng: float
+    tamil: str
 
 
 GAZETTEER: tuple[Place, ...] = (
-    Place("Sector 18 metro", 28.5708, 77.3261),
-    Place("Sector 62", 28.6270, 77.3650),
-    Place("Atta market", 28.5672, 77.3236),
-    Place("Botanical Garden metro", 28.5641, 77.3341),
-    Place("Sector 15 gurudwara", 28.5850, 77.3110),
-    Place("Gaur City 2", 28.6154, 77.4300),
-    Place("Sector 137", 28.5100, 77.4040),
-    Place("Pari Chowk", 28.4670, 77.5130),
-    Place("Rajendra Nagar Shiv mandir", 28.6740, 77.3510),
-    Place("Sector 50 park", 28.5700, 77.3640),
-    Place("Sector 76", 28.5660, 77.3850),
-    Place("Film City", 28.5770, 77.3170),
-    Place("Sector 22 market", 28.5980, 77.3420),
-    Place("Sector 93 expressway", 28.5240, 77.3830),
-    Place("Sector 104 crossing", 28.5420, 77.3730),
-    Place("Kalindi Kunj bridge", 28.5460, 77.3110),
-    Place("Sector 12 market", 28.5980, 77.3320),
-    Place("Mamura chowk", 28.6060, 77.3740),
+    Place("Marina beach", 13.0500, 80.2824, "மெரினா"),
+    Place("Velachery main road", 12.9790, 80.2210, "வேளச்சேரி"),
+    Place("Pondy Bazaar", 13.0410, 80.2340, "பாண்டி பஜார்"),
+    Place("Egmore station", 13.0780, 80.2610, "எழும்பூர்"),
+    Place("Mylapore temple", 13.0339, 80.2697, "மயிலாப்பூர்"),
+    Place("Anna Nagar 2nd Avenue", 13.0850, 80.2100, "அண்ணா நகர்"),
+    Place("Mudichur", 12.9150, 80.0700, "முடிச்சூர்"),
+    Place("Kathipara junction", 13.0070, 80.2050, "கத்திப்பாரா"),
+    Place("Vadapalani Murugan temple", 13.0520, 80.2110, "வடபழனி"),
+    Place("Semmozhi Poonga", 13.0510, 80.2510, "செம்மொழி பூங்கா"),
+    Place("Saidapet market", 13.0210, 80.2230, "சைதாப்பேட்டை"),
+    Place("Adyar bridge", 13.0130, 80.2560, "அடையாறு"),
+    Place("Koyambedu market", 13.0700, 80.1950, "கோயம்பேடு"),
+    Place("Ganesapuram subway", 13.1130, 80.2580, "கணேசபுரம்"),
+    Place("Porur junction", 13.0350, 80.1580, "போரூர்"),
+    Place("Pallikaranai", 12.9350, 80.2130, "பள்ளிக்கரணை"),
+    Place("Sowcarpet market", 13.0920, 80.2820, "சௌகார்பேட்டை"),
+    Place("Ashok Nagar", 13.0370, 80.2120, "அசோக் நகர்"),
 )
 
 _DIGITS = str.maketrans("०१२३४५६७८९০১২৩৪৫৬৭৮৯௦௧௨௩௪௫௬௭௮௯", "0123456789" * 3)
-_SECTOR_WORDS = re.compile(r"सेक्टर|सैक्टर|सेक्तर|सेक्तर|সেক্টর|செக்டர்|sec(?:tor|\.)?(?=\s*\d)", re.IGNORECASE)
 # Keep Indic letters *and* their combining vowel signs (U+0900–U+0DFF), which \w alone drops.
-_PUNCT = re.compile(r"[^\w\s\u0900-\u0DFF]")
+_PUNCT = re.compile(r"[^\w\sऀ-෿]")
 _SPACES = re.compile(r"\s+")
-_SECTOR = re.compile(r"\bsector\s*(\d{1,3})\b")
-# Misspelt "sector" ("secor 76", "sectoor 18"): an s-word close to "sector" before a number.
-_SECTOR_LIKE = re.compile(r"\b(s[a-z]{2,8})\s*(\d{1,3})\b")
 _DIGIT_RUNS = re.compile(r"\d+")
+_WORD_BEFORE = r"(?<![\wऀ-෿])"
+_TAMIL_VIRAMA = "்"
 FUZZY_RATIO = 0.85
-SECTOR_WORD_RATIO = 0.6
 
 
 def normalize(text: str) -> str:
-    """Lowercase, ASCII digits, one spelling of 'sector', no punctuation. O(L)."""
-    text = _SECTOR_WORDS.sub("sector ", text.translate(_DIGITS))
-    return _SPACES.sub(" ", _PUNCT.sub(" ", text.lower())).strip()
+    """Lowercase, ASCII digits, no punctuation. O(L)."""
+    return _SPACES.sub(" ", _PUNCT.sub(" ", text.translate(_DIGITS).lower())).strip()
 
 
-_BY_KEY: dict[str, Place] = {normalize(p.name): p for p in GAZETTEER}
-# Longest names first so "sector 18 metro" wins over a bare "sector 18".
-_LANDMARKS = re.compile(
-    "|".join(rf"\b{re.escape(k)}\b" for k in sorted(_BY_KEY, key=len, reverse=True))
-)
-_SECTOR_PLACES: dict[str, Place] = {}
+def _pattern(key: str) -> str:
+    """Whole words for Latin names; a word prefix for Tamil ones, whose last
+    consonant loses its virama when a case ending is added."""
+    if key.isascii():
+        return rf"{_WORD_BEFORE}{re.escape(key)}(?![\wऀ-෿])"
+    return _WORD_BEFORE + re.escape(key.removesuffix(_TAMIL_VIRAMA))
+
+
+_BY_KEY: dict[str, Place] = {}
 for _place in GAZETTEER:
-    _match = _SECTOR.search(normalize(_place.name))
-    if _match:
-        _SECTOR_PLACES.setdefault(_match.group(1), _place)
+    _BY_KEY[normalize(_place.name)] = _place
+    _BY_KEY[normalize(_place.tamil)] = _place
+# Longest names first so "anna nagar 2nd avenue" wins over a shorter overlapping name.
+_KEYS = sorted(_BY_KEY, key=len, reverse=True)
+_LANDMARKS = re.compile("|".join(f"({_pattern(k)})" for k in _KEYS))
+_LATIN_KEYS = {k: p for k, p in _BY_KEY.items() if k.isascii()}
 
 
-def _sector_number(key: str) -> str | None:
-    match = _SECTOR.search(key)
-    if match:
-        return match.group(1)
-    for word, number in _SECTOR_LIKE.findall(key):
-        if SequenceMatcher(None, word, "sector").ratio() >= SECTOR_WORD_RATIO:
-            return number
-    return None
+def _landmark(key: str) -> Place | None:
+    match = _LANDMARKS.search(key)
+    return _BY_KEY[_KEYS[match.lastindex - 1]] if match and match.lastindex else None
 
 
 def _fuzzy_landmark(key: str) -> Place | None:
-    """Gazetteer name matching a same-length token window despite typos.
+    """Latin gazetteer name matching a same-length token window despite typos.
 
     O(G·T) similarity checks for G gazetteer names and T tokens; only runs when
     the exact alternation found nothing.
     """
     tokens = key.split()
     best: tuple[float, Place] | None = None
-    for name, place in _BY_KEY.items():
+    for name, place in _LATIN_KEYS.items():
         width = len(name.split())
         for start in range(max(1, len(tokens) - width + 1)):
             window = " ".join(tokens[start : start + width])
             if not window or not set(window[:3]) & set(name[:3]):
                 continue
             if _DIGIT_RUNS.findall(window) != _DIGIT_RUNS.findall(name):
-                continue  # typos bend letters, never sector numbers: 44 is not 22
+                continue  # typos bend letters, never numbers: 3rd Avenue is not 2nd
             ratio = SequenceMatcher(None, window, name).ratio()
             if ratio >= FUZZY_RATIO and (best is None or ratio > best[0]):
                 best = (ratio, place)
@@ -101,28 +101,12 @@ def _fuzzy_landmark(key: str) -> Place | None:
 
 
 def gazetteer_lookup(location_text: str) -> Place | None:
-    """Known demo place mentioned in a location string, tolerating typos. O(L) + fuzzy fallback."""
+    """Known demo place mentioned in a location string (English or Tamil), tolerating typos."""
     key = normalize(location_text)
-    if key in _BY_KEY:
-        return _BY_KEY[key]
-    match = _LANDMARKS.search(key)
-    if match:
-        return _BY_KEY[match.group(0)]
-    fuzzy = _fuzzy_landmark(key)
-    if fuzzy is not None:
-        return fuzzy
-    number = _sector_number(key)
-    return _SECTOR_PLACES.get(number) if number else None
+    return _BY_KEY.get(key) or _landmark(key) or _fuzzy_landmark(key)
 
 
 def extract_location(text: str) -> str | None:
-    """Best place mention in free text: a known landmark, else 'Sector N'. O(L) + fuzzy fallback."""
-    key = normalize(text)
-    match = _LANDMARKS.search(key)
-    if match:
-        return _BY_KEY[match.group(0)].name
-    fuzzy = _fuzzy_landmark(key)
-    if fuzzy is not None:
-        return fuzzy.name
-    number = _sector_number(key)
-    return f"Sector {number}" if number else None
+    """Canonical name of the best known place mentioned in free text. O(L) + fuzzy fallback."""
+    place = gazetteer_lookup(text)
+    return place.name if place else None

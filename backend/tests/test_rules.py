@@ -71,7 +71,7 @@ def test_empty_call_is_silent_sos() -> None:
     assert silent_sos_signal("   ", "call") == "empty_call"
 
 
-@pytest.mark.parametrize("text", ["Sector 18 pe aag lagi hai", "please send help fast", "तीर्थ यात्रा"])
+@pytest.mark.parametrize("text", ["Marina beach pe aag lagi hai", "please send help fast", "तीर्थ यात्रा"])
 def test_normal_text_is_not_silent_sos(text: str) -> None:
     assert silent_sos_signal(text, "sms") is None
 
@@ -103,6 +103,6 @@ def test_same_department_repeats_are_not_pranks() -> None:
 
 
 def test_laughter_flags_prank_but_never_dismisses(rules: SafetyRules) -> None:
-    outcome = rules.apply("aliens at Atta market lol", "sms", None, low())
+    outcome = rules.apply("aliens at Pondy Bazaar lol", "sms", None, low())
     assert outcome.decision.prank_score >= 0.5
     assert "prank_suspected" in outcome.fired

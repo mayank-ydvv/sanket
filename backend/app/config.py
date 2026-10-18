@@ -55,10 +55,10 @@ class Settings(BaseSettings):
     reasoning_concurrency: int = Field(2, ge=1)
     reasoning_max_queue_wait_s: float = Field(5.0, ge=0)
 
-    # Geocoding (demo district: Noida). Viewbox is west, south, east, north.
-    geo_district: str = "Noida, Uttar Pradesh"
-    geo_center: tuple[float, float] = (28.5355, 77.3910)
-    geo_viewbox: tuple[float, float, float, float] = (77.25, 28.43, 77.55, 28.70)
+    # Geocoding (demo city: Chennai). Viewbox is west, south, east, north.
+    geo_district: str = "Chennai, Tamil Nadu"
+    geo_center: tuple[float, float] = (13.0400, 80.2100)
+    geo_viewbox: tuple[float, float, float, float] = (80.05, 12.85, 80.33, 13.25)
     nominatim_url: str = "https://nominatim.openstreetmap.org/search"
     nominatim_user_agent: str = "Sanket-triage-demo/0.1 (hackathon prototype)"
     geocode_network: bool = True
@@ -106,11 +106,11 @@ class Settings(BaseSettings):
     twilio_auth_token: str | None = None
     twilio_from_number: str | None = None
     alert_contacts: dict[str, list[Contact]] = {
-        "fire": [Contact(name="Fire station · Sector 6"), Contact(name="District fire officer")],
-        "police": [Contact(name="PCR van · Sector 20"), Contact(name="Police control room supervisor")],
+        "fire": [Contact(name="Fire station · Egmore"), Contact(name="District fire officer")],
+        "police": [Contact(name="Patrol vehicle · T. Nagar"), Contact(name="Police control room supervisor")],
         "medical": [Contact(name="108 ambulance dispatch"), Contact(name="CMO duty officer")],
-        "disaster": [Contact(name="SDRF team · Noida"), Contact(name="DM control room")],
-        "utilities": [Contact(name="UPPCL emergency desk"), Contact(name="Utilities supervisor")],
+        "disaster": [Contact(name="SDRF team · Chennai"), Contact(name="DM control room")],
+        "utilities": [Contact(name="TNPDCL emergency desk"), Contact(name="Utilities supervisor")],
         "none": [Contact(name="Control room supervisor")],
     }
 

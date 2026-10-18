@@ -24,8 +24,8 @@ from tests.conftest import receive_event
 from tests.test_incidents import make_index, placed
 from tests.test_live import RecordingHub
 
-GAUR_CITY = GeoPoint(28.6154, 77.4300, "gazetteer")
-NEXT_DOOR = GeoPoint(28.6163, 77.4300, "gazetteer")  # ~100 m north
+ANNA_NAGAR = GeoPoint(13.0850, 80.2100, "gazetteer")
+NEXT_DOOR = GeoPoint(13.0859, 80.2100, "gazetteer")  # ~100 m north
 
 
 class Clock:
@@ -60,7 +60,7 @@ def unit(seed: int) -> np.ndarray:
 
 
 async def located(db: Database, service: IncidentService, text: str, point: GeoPoint, seed: int, n: int = 1) -> Incident:
-    items = await placed(db, HashingEmbedder(), [text] * n, department="fire", severity=4, point=point, location="Gaur City 2")
+    items = await placed(db, HashingEmbedder(), [text] * n, department="fire", severity=4, point=point, location="Anna Nagar 2nd Avenue")
     items = [Placed(i.report, i.result, unit(seed), i.location_text, i.point) for i in items]
     out = await service.assign(items)
     return (out.created or out.updated)[0]
@@ -84,7 +84,7 @@ def test_parse_reasoning_grounds_and_caps_output() -> None:
             "linked_hazards": ["Smoke", "gas smell", "smoke"],
             "combined_risk": "Smoke plus gas smell: possible gas explosion risk",
             "merge_suggestions": ["i_real", "i_invented"],
-            "briefing": ["Location/access: Gaur City 2, tower B", "Hazards: smoke, gas smell", "People at risk: not stated", "extra line"],
+            "briefing": ["Location/access: Anna Nagar 2nd Avenue, tower B", "Hazards: smoke, gas smell", "People at risk: not stated", "extra line"],
             "reasoning": "ignored field",
         }
     )
@@ -107,7 +107,7 @@ async def test_trigger_rules(db: Database) -> None:
     assert reasoner.qualifies(busy)  # >= 3 reports
     mixed = await located(db, service, "smoke and a gas smell", GeoPoint(28.45, 77.45, "gazetteer"), seed=3)
     assert reasoner.qualifies(mixed)  # two hazards
-    first = await located(db, service, "smoke on the 5th floor", GAUR_CITY, seed=4)
+    first = await located(db, service, "smoke on the 5th floor", ANNA_NAGAR, seed=4)
     neighbour = await located(db, service, "fire upstairs", NEXT_DOOR, seed=5)
     assert first.id != neighbour.id and reasoner.qualifies(first)  # another incident within 300 m
     assert not reasoner.qualifies(busy.model_copy(update={"silent_sos": True}))
@@ -120,14 +120,14 @@ async def test_debounce_runs_at_most_every_20_seconds_and_only_on_change(db: Dat
     reply = json.dumps({"linked_hazards": ["fire"], "combined_risk": None, "merge_suggestions": [], "briefing": ["a", "b", "c"]})
     provider = ScriptedProvider(lambda u: reply)
     reasoner = make_reasoner(service, db, provider, clock)
-    incident = await located(db, service, "building on fire", GAUR_CITY, seed=1, n=3)
+    incident = await located(db, service, "building on fire", ANNA_NAGAR, seed=1, n=3)
     reasoner.consider([incident])
     reasoner.consider([incident])  # already pending: ignored
     assert reasoner.due() == [incident.id]
     await reasoner.reason(incident.id)
     reasoner.consider([incident])
     assert reasoner.stats.skipped_unchanged == 1 and reasoner.due() == []  # nothing changed
-    grown = await located(db, service, "building on fire", GAUR_CITY, seed=1)
+    grown = await located(db, service, "building on fire", ANNA_NAGAR, seed=1)
     assert grown.id == incident.id and grown.report_count == 4
     clock.now += 5
     reasoner.consider([grown])
@@ -140,7 +140,7 @@ async def test_debounce_runs_at_most_every_20_seconds_and_only_on_change(db: Dat
 async def test_cross_incident_reasoning_links_hazards_and_suggests_merge(db: Database) -> None:
     clock = Clock()
     service = IncidentService(db, make_index())
-    smoke = await located(db, service, "smoke on the 5th floor of tower B", GAUR_CITY, seed=1, n=3)
+    smoke = await located(db, service, "smoke on the 5th floor of tower B", ANNA_NAGAR, seed=1, n=3)
     gas = await located(db, service, "gas smell near the lift", NEXT_DOOR, seed=2)
 
     def answer(user: str) -> str:
@@ -150,7 +150,7 @@ async def test_cross_incident_reasoning_links_hazards_and_suggests_merge(db: Dat
                 "combined_risk": "Smoke plus a gas smell near the lift: possible gas explosion risk",
                 "merge_suggestions": [gas.id, "i_hallucinated"],
                 "briefing": [
-                    "Location/access: Gaur City 2, tower B, 5th floor",
+                    "Location/access: Anna Nagar 2nd Avenue, tower B, 5th floor",
                     "Hazards: smoke, gas smell near the lift",
                     "People at risk: not stated",
                 ],
@@ -176,7 +176,7 @@ async def test_failed_reasoning_leaves_incident_unchanged_and_retries_later(db: 
     clock = Clock()
     service = IncidentService(db, make_index())
     reasoner = make_reasoner(service, db, ScriptedProvider(lambda u: ProviderError("fake", "HTTP 503", retryable=True)), clock)
-    incident = await located(db, service, "building on fire", GAUR_CITY, seed=1, n=3)
+    incident = await located(db, service, "building on fire", ANNA_NAGAR, seed=1, n=3)
     assert await reasoner.reason(incident.id) is None
     assert (await service.current(incident.id)).briefing is None
     assert reasoner.stats.deferred == 1 and reasoner.stats.failed == 0
@@ -211,10 +211,10 @@ async def test_reasoning_never_blocks_intake(db: Database) -> None:
 
     reasoner = make_reasoner(service, db, Hanging(lambda u: "{}"), clock)
     runner = asyncio.create_task(reasoner.run())
-    incident = await located(db, service, "building on fire", GAUR_CITY, seed=1, n=3)
+    incident = await located(db, service, "building on fire", ANNA_NAGAR, seed=1, n=3)
     reasoner.consider([incident])
     await asyncio.sleep(0.05)  # the reasoning call is now hanging
-    more = await asyncio.wait_for(located(db, service, "building on fire", GAUR_CITY, seed=1), timeout=2)
+    more = await asyncio.wait_for(located(db, service, "building on fire", ANNA_NAGAR, seed=1), timeout=2)
     assert more.report_count == 4
     gate.set()
     runner.cancel()
@@ -222,9 +222,9 @@ async def test_reasoning_never_blocks_intake(db: Database) -> None:
 
 def test_merge_endpoint(settings: Settings) -> None:
     with TestClient(create_app(settings)) as client, client.websocket_connect("/ws") as ws:
-        client.post("/reports", json={"text": "Sector 18 metro pe building mein aag lagi hai"})
+        client.post("/reports", json={"text": "Marina beach pe building mein aag lagi hai"})
         a = receive_event(ws, "report.created")["data"]["incident_id"]
-        client.post("/reports", json={"text": "two men fighting with knives at Kalindi Kunj bridge"})
+        client.post("/reports", json={"text": "two men fighting with knives at Pallikaranai"})
         b = receive_event(ws, "report.created")["data"]["incident_id"]
         assert a != b
         response = client.post(f"/incidents/{b}/merge", json={"into": a})

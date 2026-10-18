@@ -19,11 +19,11 @@ from app.models import Decision, DecisionResult, Report
 from tests.conftest import receive_event
 from tests.surge import seeded_events, surge
 
-SECTOR_18 = GeoPoint(28.5708, 77.3261, "gazetteer")
+MARINA = GeoPoint(13.0500, 80.2824, "gazetteer")
 
 
 def make_index() -> IncidentIndex:
-    return IncidentIndex(28.5355, 1.0, 1800, 0.70, 0.15, 50)
+    return IncidentIndex(13.04, 1.0, 1800, 0.70, 0.15, 50)
 
 
 @pytest.fixture
@@ -47,8 +47,8 @@ async def placed(
     *,
     department: str = "fire",
     severity: int = 3,
-    point: GeoPoint | None = SECTOR_18,
-    location: str | None = "Sector 18 metro",
+    point: GeoPoint | None = MARINA,
+    location: str | None = "Marina beach",
 ) -> list[Placed]:
     reports = [
         Report(id=f"r_{time.perf_counter_ns()}_{i}", channel="sms", caller_hash=None, raw_text=t, received_at=time.time())
@@ -68,23 +68,23 @@ async def placed(
 async def test_duplicates_become_one_incident_with_severity_rule(db: Database) -> None:
     service = IncidentService(db, make_index())
     embedder = HashingEmbedder()
-    out = await service.assign(await placed(db, embedder, ["building on fire at Sector 18 metro"] * 11))
+    out = await service.assign(await placed(db, embedder, ["building on fire at Marina beach"] * 11))
     open_incidents = await db.incidents("open", 10)
     assert len(open_incidents) == 1 and open_incidents[0].report_count == 11
     assert open_incidents[0].severity == 4  # max 3, +1 past 10 reports
-    assert open_incidents[0].title == "Fire · Sector 18 metro" and open_incidents[0].location_confirmed
+    assert open_incidents[0].title == "Fire · Marina beach" and open_incidents[0].location_confirmed
     assert {r.incident_id for r in out.reports} == {open_incidents[0].id}
 
 
 async def test_trapped_people_escalate_severity(db: Database) -> None:
     service = IncidentService(db, make_index())
-    out = await service.assign(await placed(db, HashingEmbedder(), ["fire at Sector 18 metro, 2 people trapped"]))
+    out = await service.assign(await placed(db, HashingEmbedder(), ["fire at Marina beach, 2 people trapped"]))
     assert out.created[0].severity == 4
 
 
 async def test_split_moves_one_report_out(db: Database) -> None:
     service = IncidentService(db, make_index())
-    items = await placed(db, HashingEmbedder(), ["fire in building at Sector 18 metro"] * 3)
+    items = await placed(db, HashingEmbedder(), ["fire in building at Marina beach"] * 3)
     await service.assign(items)
     incident_id = (await db.incidents("open", 10))[0].id
     original, new = await service.split(incident_id, items[0].report.id)
@@ -97,24 +97,24 @@ async def test_split_moves_one_report_out(db: Database) -> None:
 
 async def test_restore_rebuilds_the_index(db: Database) -> None:
     embedder = HashingEmbedder()
-    await IncidentService(db, make_index()).assign(await placed(db, embedder, ["fire at Sector 18 metro"] * 2))
+    await IncidentService(db, make_index()).assign(await placed(db, embedder, ["fire at Marina beach"] * 2))
     restarted = IncidentService(db, make_index())
     assert await restarted.restore() == 1
-    out = await restarted.assign(await placed(db, embedder, ["fire at Sector 18 metro"]))
+    out = await restarted.assign(await placed(db, embedder, ["fire at Marina beach"]))
     assert not out.created and out.updated[0].report_count == 3
 
 
 async def test_different_departments_at_one_place_stay_apart(db: Database) -> None:
     service = IncidentService(db, make_index())
     embedder = HashingEmbedder()
-    await service.assign(await placed(db, embedder, ["building on fire at Sector 18 metro"]))
-    await service.assign(await placed(db, embedder, ["two men fighting with knives at Sector 18 metro"], department="police"))
+    await service.assign(await placed(db, embedder, ["building on fire at Marina beach"]))
+    await service.assign(await placed(db, embedder, ["two men fighting with knives at Marina beach"], department="police"))
     assert len(await db.incidents("open", 10)) == 2
 
 
 def test_incident_api_list_detail_split(settings: Settings) -> None:
     with TestClient(create_app(settings)) as client, client.websocket_connect("/ws") as ws:
-        ids = [client.post("/reports", json={"text": "Sector 18 metro pe building mein aag lagi hai"}).json()["id"] for _ in range(2)]
+        ids = [client.post("/reports", json={"text": "Marina beach pe building mein aag lagi hai"}).json()["id"] for _ in range(2)]
         for _ in ids:
             receive_event(ws, "report.created")
         incidents = client.get("/incidents").json()

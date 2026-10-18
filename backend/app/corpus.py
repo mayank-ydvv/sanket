@@ -9,6 +9,8 @@ template per language for the test split, so test phrasings are never trained on
 import random
 from typing import NamedTuple
 
+from app.cluster.location import GAZETTEER
+
 Language = str  # "en" | "hinglish" | "hi" | "ta" | "bn"
 LANGUAGES: tuple[Language, ...] = ("en", "hinglish", "hi", "ta", "bn")
 LATIN_LANGUAGES = frozenset({"en", "hinglish"})
@@ -36,26 +38,16 @@ class HardCase(NamedTuple):
     tag: str  # sarcasm | keyword_trap | silent_sos | same_event | implicit
 
 
-LOCATIONS: tuple[str, ...] = (
-    "Sector 18 metro",
-    "Sector 62",
-    "Atta market",
-    "Botanical Garden metro",
-    "Sector 15 gurudwara",
-    "Gaur City 2",
-    "Sector 137",
-    "Pari Chowk",
-    "Rajendra Nagar Shiv mandir",
-    "Sector 50 park",
-    "Sector 76",
-    "Film City",
-    "Sector 22 market",
-    "Sector 93 expressway",
-    "Sector 104 crossing",
-    "Kalindi Kunj bridge",
-    "Sector 12 market",
-    "Mamura chowk",
-)
+LOCATIONS: tuple[str, ...] = tuple(place.name for place in GAZETTEER)
+_TAMIL_NAMES = {place.name: place.tamil for place in GAZETTEER}
+P_TAMIL_PLACE_NAME = 0.6  # Tamil callers mostly write the place in Tamil script
+
+
+def spoken_place(name: str, language: Language, rng: random.Random) -> str:
+    """How a caller writing in ``language`` names a gazetteer place."""
+    if language == "ta" and name in _TAMIL_NAMES and rng.random() < P_TAMIL_PLACE_NAME:
+        return _TAMIL_NAMES[name]
+    return name
 
 # Noun phrases, so they read naturally inside any frame.
 VAGUE_LOCATIONS: dict[Language, tuple[str, ...]] = {
@@ -602,7 +594,7 @@ H = HardCase
 HARD_CASES: tuple[HardCase, ...] = (
     # Sarcasm and figurative use of emergency words.
     H("en", "my exam is a disaster, I am definitely going to fail", False, "none", 1, None, "sarcasm"),
-    H("en", "this traffic at Sector 18 is killing me", False, "none", 1, "Sector 18", "sarcasm"),
+    H("en", "this traffic at Kathipara is killing me", False, "none", 1, "Kathipara junction", "sarcasm"),
     H("hinglish", "yeh gaana toh fire hai bhai", False, "none", 1, None, "sarcasm"),
     H("hinglish", "meri life mein toh kaam ki baadh aa gayi hai", False, "none", 1, None, "sarcasm"),
     H("en", "I am dying of boredom in this meeting", False, "none", 1, None, "sarcasm"),
@@ -614,27 +606,27 @@ HARD_CASES: tuple[HardCase, ...] = (
     H("hinglish", "bhai aaj party mein aag laga di humne", False, "none", 1, None, "sarcasm"),
     # Emergency keyword present but no emergency.
     H("hinglish", "kal society mein fire drill hai, sabko inform kar rahe hain", False, "none", 1, None, "keyword_trap"),
-    H("en", "Is the fire station in Sector 6 hiring drivers?", False, "none", 1, "Sector 6", "keyword_trap"),
+    H("en", "Is the fire station in Egmore hiring drivers?", False, "none", 1, "Egmore station", "keyword_trap"),
     H("hi", "एम्बुलेंस सेवा का नंबर क्या है, बस जानकारी चाहिए", False, "none", 1, None, "keyword_trap"),
     # Silent SOS: the caller cannot speak freely.
     H("en", "1111111111", True, "police", 4, None, "silent_sos"),
     H("en", "... --- ...", True, "police", 4, None, "silent_sos"),
     H("en", "asdfgh jkl qwrt zxcv", True, "police", 4, None, "silent_sos"),
     H("en", "999 999 999", True, "police", 4, None, "silent_sos"),
-    H("en", "cant talk. he is in the house. sector 50", True, "police", 5, "sector 50", "silent_sos"),
+    H("en", "cant talk. he is in the house. ashok nagar", True, "police", 5, "Ashok Nagar", "silent_sos"),
     H("hinglish", "bol nahi sakti.. woh yahin hai.. help", True, "police", 5, None, "silent_sos"),
     # Same event, very different phrasing.
-    H("en", "flames and smoke coming out of tower B, Gaur City 2", True, "fire", 4, "Gaur City 2", "same_event"),
-    H("hinglish", "Gaur City 2 tower B mein aag, log neeche bhaag rahe", True, "fire", 4, "Gaur City 2", "same_event"),
-    H("en", "lots of black smoke from Gaur City 2 B block, smells like burning plastic", True, "fire", 3, "Gaur City 2", "same_event"),
-    H("en", "smell of gas near the lift and smoke on the 5th floor, Sector 62", True, "fire", 5, "Sector 62", "same_event"),
+    H("en", "flames and smoke coming out of tower B, Anna Nagar 2nd Avenue", True, "fire", 4, "Anna Nagar 2nd Avenue", "same_event"),
+    H("hinglish", "Anna Nagar 2nd Avenue tower B mein aag, log neeche bhaag rahe", True, "fire", 4, "Anna Nagar 2nd Avenue", "same_event"),
+    H("en", "lots of black smoke from Anna Nagar 2nd Avenue B block, smells like burning plastic", True, "fire", 3, "Anna Nagar 2nd Avenue", "same_event"),
+    H("en", "smell of gas near the lift and smoke on the 5th floor, Velachery main road", True, "fire", 5, "Velachery main road", "same_event"),
     # Real emergencies described without the usual keywords.
     H("hinglish", "pitaji ki saans phool rahi hai, honth neele pad gaye", True, "medical", 5, None, "implicit"),
     H("en", "my grandmother is not waking up", True, "medical", 5, None, "implicit"),
-    H("hi", "बच्चा तालाब में डूब रहा है, सेक्टर 137", True, "disaster", 5, "सेक्टर 137", "implicit"),
+    H("hi", "बच्चा तालाब में डूब रहा है, Mudichur", True, "disaster", 5, "Mudichur", "implicit"),
     H("bn", "বাবা বুক চেপে ধরে বসে আছে, কথা বলতে পারছে না", True, "medical", 5, None, "implicit"),
     H("ta", "அம்மா பேசவே இல்லை, கண் திறக்கவில்லை", True, "medical", 5, None, "implicit"),
-    H("hi", "छत पर फंसे हैं, पानी गले तक आ गया, सेक्टर 15", True, "disaster", 5, "सेक्टर 15", "implicit"),
+    H("hi", "छत पर फंसे हैं, पानी गले तक आ गया, Mylapore", True, "disaster", 5, "Mylapore temple", "implicit"),
 )
 
 # Train-only domain vocabulary: generic words a dispatcher associates with each

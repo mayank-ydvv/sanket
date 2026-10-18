@@ -62,12 +62,12 @@ async def test_burst_coalesces_into_one_message_per_flush() -> None:
 async def test_updates_send_only_changed_fields() -> None:
     hub = RecordingHub()
     b = Broadcaster(hub)  # type: ignore[arg-type]
-    b.publish("incident.created", {"id": "i1", "severity": 3, "title": "Fire · Sector 18"})
+    b.publish("incident.created", {"id": "i1", "severity": 3, "title": "Fire · Marina beach"})
     await b.flush()
-    b.publish("incident.updated", {"id": "i1", "severity": 4, "title": "Fire · Sector 18"})
+    b.publish("incident.updated", {"id": "i1", "severity": 4, "title": "Fire · Marina beach"})
     await b.flush()
     assert hub.messages[1][1] == [{"type": "incident.updated", "data": {"id": "i1", "severity": 4}}]
-    b.publish("incident.updated", {"id": "i1", "severity": 4, "title": "Fire · Sector 18"})
+    b.publish("incident.updated", {"id": "i1", "severity": 4, "title": "Fire · Marina beach"})
     assert await b.flush() == 0 and len(hub.messages) == 2  # nothing changed, nothing sent
 
 
@@ -98,7 +98,7 @@ async def test_flush_rate_is_at_most_ten_per_second() -> None:
 
 async def alert_setup(db: Database, clock: Clock) -> tuple[AlertService, MockSender, str, IncidentService]:
     incidents = IncidentService(db, make_index(), clock=clock)
-    changes = await incidents.assign(await placed(db, HashingEmbedder(), ["fire at Sector 18 metro"]))
+    changes = await incidents.assign(await placed(db, HashingEmbedder(), ["fire at Marina beach"]))
     sender = MockSender()
     ladder = {"fire": [Contact(name="Station"), Contact(name="Supervisor")]}
     alerts = AlertService(db, incidents, Broadcaster(RecordingHub()), sender, ladder, 90, clock=clock)  # type: ignore[arg-type]
@@ -164,7 +164,7 @@ def test_local_decision_first_then_llm_revision_and_auto_dispatch(
     provider.complete = slow_complete  # type: ignore[method-assign]
     monkeypatch.setattr(main_module, "build_llm_decider", lambda cfg, http, limiters, recorder=None: make_decider(provider))
     with TestClient(create_app(settings)) as client, client.websocket_connect("/ws") as ws:
-        report_id = client.post("/reports", json={"text": "Sector 18 metro pe kuch ho gaya, jaldi aao"}).json()["id"]
+        report_id = client.post("/reports", json={"text": "Marina beach pe kuch ho gaya, jaldi aao"}).json()["id"]
         first = receive_event(ws, "report.created")["data"]
         assert first["id"] == report_id and first["refining"] and first["source"] == "local"
         revised = receive_event(ws, "report.updated")["data"]
@@ -172,16 +172,16 @@ def test_local_decision_first_then_llm_revision_and_auto_dispatch(
         assert "incident_id" not in revised  # diff: only changed fields are sent
         assert revised["decision"]["department"] == "fire"
         alert = receive_event(ws, "alert.sent")["data"]
-        assert alert["triggered_by"] == "auto" and alert["contact"] == "Fire station · Sector 6"
+        assert alert["triggered_by"] == "auto" and alert["contact"] == "Fire station · Egmore"
         incident = client.get(f"/incidents/{first['incident_id']}").json()
         assert incident["incident"]["department"] == "fire" and incident["incident"]["status"] == "dispatched"
-        assert [a["contact"] for a in incident["alerts"]] == ["Fire station · Sector 6"]
+        assert [a["contact"] for a in incident["alerts"]] == ["Fire station · Egmore"]
     assert provider.calls == 1
 
 
 def test_confirm_ack_override_endpoints(settings: Settings) -> None:
     with TestClient(create_app(settings)) as client, client.websocket_connect("/ws") as ws:
-        client.post("/reports", json={"text": "Sector 18 metro pe building mein aag"})
+        client.post("/reports", json={"text": "Marina beach pe building mein aag"})
         incident_id = receive_event(ws, "report.created")["data"]["incident_id"]
         alert = client.post(f"/incidents/{incident_id}/confirm").json()
         assert alert["triggered_by"] == "dispatcher" and alert["level"] == 0
@@ -205,23 +205,23 @@ async def test_revision_that_changes_department_moves_report_to_right_incident(d
 
     from app.cluster.service import Revision
     from app.models import DecisionResult
-    from tests.test_incidents import SECTOR_18, decision
+    from tests.test_incidents import MARINA, decision
 
     def unit(seed: int) -> np.ndarray:
         v = np.random.default_rng(seed).normal(size=64).astype(np.float32)
         return v / np.linalg.norm(v)
 
     incidents = IncidentService(db, make_index())
-    fire_items = await placed(db, HashingEmbedder(), ["fire at Sector 18 metro"], department="fire")
+    fire_items = await placed(db, HashingEmbedder(), ["fire at Marina beach"], department="fire")
     fire_items = [item.__class__(**{**item.__dict__, "vector": unit(1)}) for item in fire_items]
     fire = (await incidents.assign(fire_items)).created[0]
-    wrong = await placed(db, HashingEmbedder(), ["aag lagi Sector 18 metro"], department="police")
+    wrong = await placed(db, HashingEmbedder(), ["aag lagi Marina beach"], department="police")
     wrong = [item.__class__(**{**item.__dict__, "vector": unit(2)}) for item in wrong]
     police = (await incidents.assign(wrong)).created[0]
     assert police.id != fire.id and police.department == "police"
 
     revised = DecisionResult(decision=decision("fire", 4), source="llm", confidence=0.95, model="fake/llm")
-    changes = await incidents.revise([Revision(wrong[0].report.id, revised, unit(1), "Sector 18 metro", SECTOR_18)])
+    changes = await incidents.revise([Revision(wrong[0].report.id, revised, unit(1), "Marina beach", MARINA)])
     by_id = {i.id: i for i in changes.updated}
     assert by_id[fire.id].report_count == 2
     assert by_id[police.id].status == "merged"
@@ -249,7 +249,7 @@ async def test_escalation_follows_the_alerts_own_ladder_after_department_change(
 
     clock = Clock()
     incidents = IncidentService(db, make_index(), clock=clock)
-    changes = await incidents.assign(await placed(db, HashingEmbedder(), ["fire at Sector 18 metro"]))
+    changes = await incidents.assign(await placed(db, HashingEmbedder(), ["fire at Marina beach"]))
     incident_id = changes.created[0].id
     ladders = {"fire": [Contact(name="Station"), Contact(name="Supervisor")], "none": [Contact(name="Control room")]}
     alerts = AlertService(db, incidents, Broadcaster(RecordingHub()), MockSender(), ladders, 90, clock=clock)  # type: ignore[arg-type]
@@ -265,7 +265,7 @@ async def test_department_change_after_dispatch_alerts_the_new_department(db: Da
 
     clock = Clock()
     incidents = IncidentService(db, make_index(), clock=clock)
-    changes = await incidents.assign(await placed(db, HashingEmbedder(), ["fire at Sector 18 metro"], department="disaster"))
+    changes = await incidents.assign(await placed(db, HashingEmbedder(), ["fire at Marina beach"], department="disaster"))
     incident_id = changes.created[0].id
     sender = MockSender()
     ladders = {"disaster": [Contact(name="SDRF"), Contact(name="DM")], "fire": [Contact(name="Fire station"), Contact(name="CFO")]}

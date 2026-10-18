@@ -46,7 +46,7 @@ class GeocoderConfig:
 GENERIC_PLACE_WORDS = frozenset(
     "colony road street lane market area building house floor near nagar chowk metro station "
     "bridge park city village block tower society gate temple mandir school hospital sector "
-    "main new old the and".split()
+    "main new old the and salai avenue cross kovil koil junction subway bazaar beach".split()
 )
 
 

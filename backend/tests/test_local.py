@@ -10,8 +10,8 @@ from scripts.dataset import TEST_PATH, load
 from tests.conftest import receive_event
 
 EASY = [
-    ("Sector 18 pe building mein aag lagi hai, dhuaan nikal raha", "fire"),
-    ("सेक्टर 62 पर दो लोग चाकू लेकर लड़ रहे हैं, मारपीट हो रही है", "police"),
+    ("Marina beach pe building mein aag lagi hai, dhuaan nikal raha", "fire"),
+    ("Velachery main road पर दो लोग चाकू लेकर लड़ रहे हैं, मारपीट हो रही है", "police"),
     ("papa ko seene mein dard, ambulance chahiye", "medical"),
     ("বাড়িতে জল ঢুকেছে, বন্যা, লোকজন ছাদে আটকে", "disaster"),
 ]

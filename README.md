@@ -1,8 +1,10 @@
 # Sanket — AI emergency triage agent
 
-Turns a flood of messy, multilingual emergency reports (calls, SMS, web) into a short,
-ranked list of de-duplicated incidents, each routed to the right department within about
-two seconds, on free-tier models. **System 1** (a local classifier plus a batched fast LLM
+Built for **Chennai**. Turns a flood of messy, multilingual emergency reports (calls, SMS,
+web) in Tamil, English, Hindi, Hinglish and Bengali into a short, ranked list of
+de-duplicated incidents, each routed to the right department within about two seconds, on
+free-tier models. Every non-English report carries an English translation, and the whole
+web app can be switched between English and Tamil. **System 1** (a local classifier plus a batched fast LLM
 for uncertain reports, then safety rules) decides every report. **System 2** (a reasoning
 model) looks only at complex incidents, links hazards across reports and writes crew
 briefings. Nothing is ever auto-dismissed. All data in this repo is synthetic.
@@ -29,16 +31,20 @@ internet**. For live mode, add at least one LLM key to `.env` and run `./run.sh`
 
 1. **Sign in** with the demo account (`demo@sanket.local`; the password is `DEMO_PASSWORD`
    from `.env`, or the one `setup.sh` printed).
-2. **Overview → Disaster mode**: 500 reports about 12 flood events in five languages arrive
-   in 10 s. Watch the live feed, the KPIs and the cost ticker (actual tokens at list price
-   vs sending every report to a large reasoning model).
-3. **Incidents**: the ranked list and the map. Open an incident to see its merged reports
-   and the rules that fired, then the audit trail. Use the *Linked risk* filter to find
+2. **Language**: the **தமிழ் / English** button (top right on every page) switches the
+   whole app; the choice is remembered per browser.
+3. **Overview → Disaster mode**: 500 reports about 12 Chennai flood events (Mudichur,
+   Pallikaranai, Ganesapuram subway, Adyar bridge, …) in five languages arrive in 10 s. Watch the live feed, the KPIs and the cost ticker (actual tokens at list price
+   vs sending every report to a large reasoning model). Non-English reports in the feed
+   show their English translation underneath.
+4. **Incidents**: the ranked list and the map. Open an incident to see its merged reports,
+   each with the original text, its English translation and the rules that fired, then the
+   audit trail. Use the *Linked risk* filter to find
    incidents where System 2 combined hazards (for example a fire plus a gas smell), and
    read the 3-line crew briefing.
-4. **Alerts**: auto-dispatched incidents alert the department's first contact (mock
+5. **Alerts**: auto-dispatched incidents alert the department's first contact (mock
    sender by default). Anything unacknowledged escalates after 90 s.
-5. **Benchmark**: accuracy vs cost for five approaches on the held-out test set.
+6. **Benchmark**: accuracy vs cost for five approaches on the held-out test set.
 
 Reset between rehearsals: stop `run.sh` (Ctrl-C), then
 `(cd backend && .venv/bin/python -m scripts.seed_demo)`. The old database is moved to
@@ -46,8 +52,8 @@ Reset between rehearsals: stop `run.sh` (Ctrl-C), then
 
 ### Demo replay: when the Wi-Fi or the APIs fail
 
-`DEMO_CACHE=true` (what `./run.sh --demo` sets) serves every fast-LLM decision and every
-System 2 result from `backend/data/demo_run.jsonl` after the delay the provider took
+`DEMO_CACHE=true` (what `./run.sh --demo` sets) serves every fast-LLM decision (with its
+translation), every on-demand translation and every System 2 result from `backend/data/demo_run.jsonl` after the delay the provider took
 originally, instead of calling any provider. Nominatim and the Hugging Face hub are also switched off (the
 gazetteer still places district landmarks; the embedding model is the copy `setup.sh` cached). Everything else runs for real: the local
 model, rules, clustering, alerts, escalation, the WebSocket and the cost ticker (fed with
@@ -77,7 +83,7 @@ Every setting is documented in [`.env.example`](.env.example). The important one
 | `REASONING_ENABLED` | `true` | turn System 2 on or off |
 | `MOCK_ALERTS` | `true` | log alerts instead of sending SMS |
 | `TWILIO_*`, `PUBLIC_BASE_URL`, `ALERT_CONTACTS` | empty | voice/SMS intake and real SMS alerts |
-| `GEO_*`, `NOMINATIM_*` | Noida | demo district, viewbox and geocoder |
+| `GEO_*`, `NOMINATIM_*` | Chennai | demo city centre, viewbox and geocoder |
 | `AUTH_REQUIRED` | `true` | dispatcher routes need a session |
 
 With no LLM key at all, the app still runs: uncertain reports keep their local decision
@@ -126,7 +132,7 @@ Post a report by hand:
 
 ```bash
 curl -X POST localhost:8010/reports -H 'content-type: application/json' \
-  -d '{"text":"aag lagi hai sector 18","channel":"sms","caller":"+919999999999"}'
+  -d '{"text":"முடிச்சூரில் வெள்ளம், மக்கள் மாடியில் சிக்கியுள்ளனர்","channel":"sms","caller":"+919999999999"}'
 ```
 
 # How it works
@@ -172,8 +178,11 @@ Score a running server against 100 held-out test reports:
 
 ## Geocoding and incident clustering
 
-- **Location**: the LLM's `location_text`, else a regex/gazetteer extractor ("Sector N",
-  known landmarks, Devanagari/Bengali/Tamil digits). Geocoding goes gazetteer → in-memory
+- **Location**: the LLM's `location_text`, else the gazetteer extractor: 18 Chennai
+  landmarks, each with its English and Tamil name. Tamil names match as word prefixes
+  because Tamil adds case endings ("முடிச்சூரில்" = "in Mudichur"); English names tolerate
+  typos but never a changed number ("3rd Avenue" is not "2nd Avenue"); Tamil, Devanagari and
+  Bengali digits are normalised. Geocoding goes gazetteer → in-memory
   LRU → SQLite `geocode_cache` (misses cached too) → Nominatim, behind one global 1 req/s
   limiter, bounded to the district viewbox, with a custom User-Agent. If the limiter queue
   is too long the report stays "location unconfirmed" instead of stalling triage.
@@ -226,7 +235,8 @@ it may join the wrong one. These incidents are marked "location unconfirmed" for
 
 ## Voice and SMS intake (Twilio)
 
-- `POST /twilio/voice` answers with a Hindi + English prompt and records up to 60 s. If the
+- `POST /twilio/voice` answers with a Tamil + English prompt (Tamil via Twilio's
+  `Google.ta-IN-Standard-A` voice) and records up to 60 s. If the
   caller says nothing, the call is reported with empty text, which the rules treat as a
   silent SOS (police, human review).
 - `POST /twilio/recording` replies to Twilio immediately, then in the background downloads
@@ -258,14 +268,15 @@ it may join the wrong one. These incidents are marked "location unconfirmed" for
 Known limits: a Twilio trial number is usually a US number (Indian numbers need regulatory
 approval), so calling it from an Indian phone is an international call for the caller.
 Spoken numbers are a weak spot: in a test, "सेक्टर बासठ" (sector sixty-two) was transcribed as
-"सेक्तर बासक", so the gazetteer cannot place it and the LLM's location extraction or a
-dispatcher callback has to.
+"सेक्तर बासक", so a spoken address number may need the LLM's location extraction or a
+dispatcher callback. The Tamil greeting voice has not been tried on a live Twilio call yet.
 
 ## Disaster mode and cost ticker
 
 `POST /simulate/disaster?n=500&seconds=10&scenario=flood` (or the **Disaster mode** button)
-streams a seeded flood surge through the real pipeline: 12 events across the district
-(rooftop rescues, a bus in an underpass, a wall collapse, live wires in water, a building
+streams a seeded Chennai flood surge through the real pipeline: 12 events across the city
+(rooftop rescues in Mudichur, a bus stuck in the Ganesapuram subway, a wall collapse in
+Ashok Nagar, the Adyar overflowing, live wires in water, a building
 with both a gas smell and a fire upstairs, looting, …) in five languages, with callers
 calling back, panic and typos, one prank caller sending contradicting reports, two silent
 SOS calls and some non-urgent noise. `GET /simulate/status` and `simulation.updated`
@@ -276,15 +287,15 @@ report, per model, at list price, against a counterfactual of sending every repo
 a large reasoning model (full prompt + reasoning output). Free tiers bill ₹0; both numbers
 are list price, so the comparison holds at production scale.
 
-Measured live (free tiers, 2026-10-17), 500 reports in 10 s:
+Measured live on the Chennai scenario (free tiers, 2026-10-18), 500 reports in 10 s:
 
 | | |
 |---|---|
-| all 500 reports decided and on the board | 10.2 s after the first (pipeline 0.2 s behind intake) |
-| LLM calls | 18–20 (343 reports revised by the LLM; the rest kept their local decision when free-tier limits hit) |
-| cost at list price | ₹0.54–0.79 vs ₹477.75 for all-to-large-LLM (≈ 99.8% less; ₹1.6 vs ₹955 per 1,000 reports) |
-| incidents | the 12 events → 12 large incidents (16–71 reports each), plus ~25 small ones: non-urgent complaints, the prank caller's decoys, both silent SOS calls (always kept separate), and singletons whose LLM call fell back |
-| API memory | ~0.9 GB RSS with both models loaded |
+| all 500 reports decided and on the board | 10.2 s after the first |
+| LLM calls during the surge | 15 (277 reports revised by the LLM, with their English translation; the rest kept their local decision when free-tier limits hit and were translated when their incident was opened) |
+| cost at list price | ₹0.94 vs ₹477.75 for all-to-large-LLM during the surge (≈ 99.8% less); ₹1.76 after translating every report and the first System 2 briefings |
+| incidents | the 12 events → 12 large incidents (22–75 reports each), plus small ones: non-urgent complaints, the prank caller's decoys, both silent SOS calls (always kept separate), and singletons whose LLM call fell back |
+| API memory | ~0.9 GB RSS with both models loaded (Noida run) |
 
 The simulator reuses the corpus phrasings, including those the local model trained on, so
 disaster mode shows system behaviour, not accuracy. Accuracy comes from the held-out test
@@ -340,6 +351,25 @@ Keyword rules beat the local classifier on its own. Latencies are dominated by f
 throttling. Pure-LLM approaches re-ask unanswered reports after quotas refill (the hybrid
 never needs to, since its local answer stands in).
 
+## Languages and translation
+
+- **Reports** may be in Tamil, English, Hindi, Hinglish or Bengali (or mixed). Tamil callers
+  usually name the place in Tamil script, and the gazetteer understands both.
+- **English translation of every report** (`reports.english_gloss`; `""` means the report
+  was already English):
+  - uncertain reports get it for free inside the fast-LLM decision (prompt `decision_v3`
+    adds a short `"en"` field), so it arrives with the revised decision;
+  - reports the local model decided alone are translated when a dispatcher opens their
+    incident (`POST /incidents/{id}/translate`, prompt `translate_v1`): one batched call
+    of up to 30 reports on the System 1 provider chain, at most once per report, counted in
+    the cost ticker. If no provider is free, the original stays and it is retried on the
+    next open.
+- **Web app language**: an English / Tamil switch on every page (`frontend/src/lib/messages.ts`
+  holds both dictionaries; TypeScript refuses to build if a Tamil string is missing).
+  Incident titles are composed in the UI language from department + place. What the LLMs
+  write (briefings, linked-risk warnings, hazards) and server error messages other than the
+  sign-in ones stay in English.
+
 ## Web app
 
 React + Vite + Tailwind with a light/dark theme (remembered; follows the OS by default) and
@@ -369,6 +399,13 @@ WebSocket require a session. `scripts/post_reports.py --email … --password …
   incident. They are marked "location unconfirmed" for a callback, and dispatchers can split.
 - **Spoken numbers** are often mis-transcribed ("सेक्टर बासठ" became "सेक्तर बासक"), so voice
   reports may need the LLM's location extraction or a callback.
+- **Benchmark numbers are from the earlier Noida dataset.** The corpus was regenerated with
+  Chennai places and Tamil-script place names (the local model was retrained: emergency F1
+  0.83, department accuracy 0.47 on the visible test split), but the five-way benchmark has
+  not been re-run on it yet (it needs a day of fresh free-tier quota). The Benchmark page
+  says so.
+- **UI Tamil** was written for this demo, not reviewed by a professional translator; LLM
+  output (briefings, warnings) is English only.
 - **Synthetic data only.** The corpus, simulator and benchmark are generated. The
   simulator reuses training phrasings, so Disaster mode shows behaviour, not accuracy.
 - **Demo replay** covers the seeded Disaster mode run. New free-text reports during

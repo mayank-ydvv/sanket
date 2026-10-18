@@ -18,7 +18,7 @@ def main() -> None:
     if not settings.public_base_url or not settings.twilio_auth_token:
         raise SystemExit("set PUBLIC_BASE_URL and TWILIO_AUTH_TOKEN in sanket/.env first")
     url = f"{settings.public_base_url.rstrip('/')}/twilio/sms"
-    form = {"Body": "TEST (twilio_check): Sector 18 metro pe aag lagi hai", "From": "+910000000000"}
+    form = {"Body": "TEST (twilio_check): Marina beach pe aag lagi hai", "From": "+910000000000"}
     response = httpx.post(
         url,
         data=form,

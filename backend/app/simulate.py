@@ -25,6 +25,7 @@ from app.corpus import (
     PANIC,
     PRANKS,
     add_typos,
+    spoken_place,
 )
 from app.intake.service import Intake
 from app.models import Channel
@@ -56,18 +57,18 @@ class SeedEvent:
 
 
 FLOOD_EVENTS: tuple[SeedEvent, ...] = (
-    SeedEvent("disaster", (0,), "Sector 137", 3.0),  # people on rooftops
-    SeedEvent("disaster", (0,), "Kalindi Kunj bridge", 2.0),
-    SeedEvent("disaster", (5,), "Sector 93 expressway", 2.0),  # bus stuck in underpass
-    SeedEvent("disaster", (1,), "Mamura chowk", 1.5),  # wall collapse
-    SeedEvent("disaster", (7,), "Film City", 1.5),  # river overflowing
-    SeedEvent("utilities", (0,), "Sector 76", 1.5),  # live wire in water
-    SeedEvent("utilities", (1,), "Sector 104 crossing", 1.0),  # transformer burst
-    SeedEvent("medical", (1,), "Botanical Garden metro", 1.0),
-    SeedEvent("medical", (2,), "Pari Chowk", 1.0),
-    SeedEvent("fire", (5, 1), "Gaur City 2", 1.5),  # gas smell + fire upstairs: one building, two clues
-    SeedEvent("police", (4,), "Atta market", 0.8),  # looting
-    SeedEvent("fire", (0,), "Sector 12 market", 0.8),
+    SeedEvent("disaster", (0,), "Mudichur", 3.0),  # people on rooftops
+    SeedEvent("disaster", (0,), "Pallikaranai", 2.0),
+    SeedEvent("disaster", (5,), "Ganesapuram subway", 2.0),  # bus stuck in underpass
+    SeedEvent("disaster", (1,), "Ashok Nagar", 1.5),  # wall collapse
+    SeedEvent("disaster", (7,), "Adyar bridge", 1.5),  # river overflowing
+    SeedEvent("utilities", (0,), "Saidapet market", 1.5),  # live wire in water
+    SeedEvent("utilities", (1,), "Porur junction", 1.0),  # transformer burst
+    SeedEvent("medical", (1,), "Egmore station", 1.0),
+    SeedEvent("medical", (2,), "Kathipara junction", 1.0),
+    SeedEvent("fire", (5, 1), "Anna Nagar 2nd Avenue", 1.5),  # gas smell + fire upstairs: one building, two clues
+    SeedEvent("police", (4,), "Pondy Bazaar", 0.8),  # looting
+    SeedEvent("fire", (0,), "Sowcarpet market", 0.8),
 )
 SCENARIOS: dict[str, tuple[SeedEvent, ...]] = {"flood": FLOOD_EVENTS}
 
@@ -91,7 +92,7 @@ def _event_text(event: SeedEvent, language: str, rng: random.Random) -> str:
     keys = ESCALATORS_BY_DEPARTMENT.get(department, ())
     if keys and rng.random() < P_ESCALATOR:
         phrase = f"{phrase}, {ESCALATORS[language][rng.choice(keys)]}"
-    text = rng.choice(FRAMES[language]).replace("{event}", phrase).replace("{loc}", event.place)
+    text = rng.choice(FRAMES[language]).replace("{event}", phrase).replace("{loc}", spoken_place(event.place, language, rng))
     if rng.random() < P_PANIC:
         panic = rng.choice(PANIC[language])
         text = f"{panic} {text}" if rng.random() < 0.5 else f"{text} {panic}"
@@ -124,11 +125,11 @@ def generate(scenario: Scenario, n: int, seed: int = 7) -> list[SimReport]:
         channel: Channel = _pick(rng, CHANNEL_WEIGHTS)
         if roll < SHARE_NON_URGENT:
             template = rng.choice(NON_URGENT[language])
-            text = template.text.replace("{loc}", rng.choice(events).place)
+            text = template.text.replace("{loc}", spoken_place(rng.choice(events).place, language, rng))
             reports.append(SimReport(text, channel, f"+9197{rng.randrange(10**8):08d}", "non_urgent"))
             continue
         if roll < SHARE_NON_URGENT + SHARE_GENERIC_PRANK:
-            text = rng.choice(PRANKS[language]).replace("{loc}", rng.choice(events).place)
+            text = rng.choice(PRANKS[language]).replace("{loc}", spoken_place(rng.choice(events).place, language, rng))
             reports.append(SimReport(text, channel, f"+9196{rng.randrange(10**8):08d}", "prank"))
             continue
         index = rng.choices(range(len(events)), weights=weights)[0]

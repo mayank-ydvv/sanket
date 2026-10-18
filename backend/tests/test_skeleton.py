@@ -34,14 +34,14 @@ def test_report_is_broadcast_over_websocket(client: TestClient) -> None:
     with client.websocket_connect("/ws") as ws:
         response = client.post(
             "/reports",
-            json={"text": "aag lagi hai sector 18", "channel": "sms", "caller": "+91 99999 99999"},
+            json={"text": "aag lagi hai marina beach", "channel": "sms", "caller": "+91 99999 99999"},
         )
         assert response.status_code == 202
         event = receive_event(ws, "report.created")
     assert event["type"] == "report.created"
     data = event["data"]
     assert data["id"] == response.json()["id"]
-    assert data["raw_text"] == "aag lagi hai sector 18"
+    assert data["raw_text"] == "aag lagi hai marina beach"
     assert data["decision"]["needs_human_review"] is True
     assert data["caller_hash"] == hash_caller("+919999999999", TEST_SALT)
 

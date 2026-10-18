@@ -7,7 +7,7 @@ import numpy as np
 from app.cluster.index import IncidentIndex, haversine_km
 
 DIM = 32
-LAT, LNG = 28.5708, 77.3261  # Sector 18 metro
+LAT, LNG = 13.0500, 80.2824  # Marina beach
 
 
 class Clock:
@@ -24,7 +24,7 @@ def unit(seed: int) -> np.ndarray:
 
 
 def make_index(clock: Clock | None = None) -> IncidentIndex:
-    return IncidentIndex(28.5355, 1.0, 1800, 0.7, 0.15, 50, clock=clock or Clock())
+    return IncidentIndex(13.04, 1.0, 1800, 0.7, 0.15, 50, clock=clock or Clock())
 
 
 def km_north(lat: float, km: float) -> float:
