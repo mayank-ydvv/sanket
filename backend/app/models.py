@@ -62,6 +62,7 @@ class DecisionResult(BaseModel):
     model: str
     prompt_version: str | None = None
     rules_fired: list[str] = Field(default_factory=list)
+    english_gloss: str | None = None  # LLM translation; "" = already English, None = not asked
 
 
 class ReportIn(BaseModel):

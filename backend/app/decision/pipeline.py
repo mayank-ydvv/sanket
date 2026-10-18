@@ -87,6 +87,7 @@ class DecisionPipeline:
                 confidence=outcome.decision.confidence,
                 model=f"{outcome.provider}/{outcome.model}",
                 prompt_version=self._llm.prompt_version,
+                english_gloss=outcome.english,
             )
             revised.append(self._apply_rules(report, result, prior_prank=prior.decision.prank_score))
         return revised

@@ -73,7 +73,7 @@ async def test_100_uncertain_reports_take_at_most_5_calls() -> None:
     assert len(results) == 100
     assert provider.calls <= 5
     assert all(r.source == "llm" and r.decision.department == "fire" for r in results)
-    assert all(r.prompt_version == "decision_v2" for r in results)
+    assert all(r.prompt_version == "decision_v3" for r in results)
 
 
 async def test_rate_limited_provider_falls_through_to_next() -> None:

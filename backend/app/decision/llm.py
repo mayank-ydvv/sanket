@@ -28,14 +28,14 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 PROMPTS_DIR = Path(__file__).resolve().parents[2] / "prompts"
-DECISION_PROMPT_VERSION = "decision_v2"
+DECISION_PROMPT_VERSION = "decision_v3"
 COOLDOWN_BASE_S = 2.0
 COOLDOWN_MAX_S = 60.0
 CHARS_PER_TOKEN = 2.5
-OUTPUT_TOKENS_PER_ITEM = 40
+OUTPUT_TOKENS_PER_ITEM = 65  # incl. a short English translation for non-English reports
 # Hard cap on reply length: generous headroom over the estimate, so a valid reply
 # is never truncated while a runaway one cannot eat the output quota.
-OUTPUT_CAP_PER_ITEM = 60
+OUTPUT_CAP_PER_ITEM = 110
 OUTPUT_CAP_BASE = 128
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$")
 
@@ -45,7 +45,7 @@ def load_prompt(version: str) -> str:
 
 
 class LLMItem(BaseModel):
-    """One element of the model's compact JSON array (prompt decision_v2).
+    """One element of the model's compact JSON array (prompts decision_v2 and v3).
 
     Short keys keep output tokens low, which is what bounds both latency and the
     free tiers' output-token quotas. Strict types; unknown keys are ignored.
@@ -66,9 +66,10 @@ class LLMItem(BaseModel):
     silent_sos: bool = Field(False, alias="sos")
     prank_score: float = Field(0.0, alias="pr", ge=0.0, le=1.0)
     needs_human_review: bool = Field(False, alias="rev")
+    english: str | None = Field(None, alias="en")  # decision_v3: omitted when already English
 
     def to_decision(self) -> Decision:
-        return Decision(**self.model_dump(exclude={"idx"}))
+        return Decision(**self.model_dump(exclude={"idx", "english"}))
 
 
 def _salvage_objects(text: str) -> list[Any]:
@@ -91,8 +92,8 @@ def _salvage_objects(text: str) -> list[Any]:
         items.append(obj)
 
 
-def parse_decisions(text: str, count: int) -> dict[int, Decision]:
-    """Parse ``{"r": [...]}`` (or a bare array) into decisions keyed by idx. O(n).
+def parse_decisions(text: str, count: int) -> dict[int, LLMItem]:
+    """Parse ``{"r": [...]}`` (or a bare array) into validated items keyed by idx. O(n).
 
     Items that fail validation, repeat an idx or fall outside ``[0, count)`` are dropped,
     so one bad item never discards the rest of the batch. A reply cut off by the
@@ -106,15 +107,15 @@ def parse_decisions(text: str, count: int) -> dict[int, Decision]:
         items = _salvage_objects(cleaned)
     if not isinstance(items, list):
         return {}
-    decisions: dict[int, Decision] = {}
+    parsed: dict[int, LLMItem] = {}
     for raw in items:
         try:
             item = LLMItem.model_validate(raw)
         except ValidationError:
             continue
-        if 0 <= item.idx < count and item.idx not in decisions:
-            decisions[item.idx] = item.to_decision()
-    return decisions
+        if 0 <= item.idx < count and item.idx not in parsed:
+            parsed[item.idx] = item
+    return parsed
 
 
 def format_reports(texts: Sequence[str]) -> str:
@@ -224,6 +225,7 @@ class LLMOutcome:
     decision: Decision
     provider: str
     model: str
+    english: str | None = None  # translation; "" when the report is already English
 
 
 class Decider(Protocol):
@@ -325,8 +327,9 @@ class LLMDecider:
                 except AllProvidersFailed:
                     break
                 decisions = parse_decisions(reply.text, len(todo))
-                for local_idx, decision in decisions.items():
-                    outcome = LLMOutcome(decision, reply.provider, reply.model)
+                for local_idx, item in decisions.items():
+                    english = " ".join((item.english or "").split())
+                    outcome = LLMOutcome(item.to_decision(), reply.provider, reply.model, english)
                     outcomes[todo[local_idx]] = outcome
                     if self._recorder is not None:
                         self._recorder.decision(batch[todo[local_idx]].text, outcome, reply, len(todo))

@@ -222,19 +222,25 @@ class Database:
             ),
         )
 
+    async def save_glosses(self, items: Sequence[tuple[str, str]]) -> None:
+        """Store English translations ("" = already English). O(b log n)."""
+        await self._conn.executemany("UPDATE reports SET english_gloss = ? WHERE id = ?", [(g, i) for i, g in items])
+
     async def save_decisions(
         self, items: Sequence[tuple[str, DecisionResult]], action: str = "decided"
     ) -> None:
         """Store a batch of decisions plus one audit row each. O(b log n)."""
         now = time.time()
         await self._conn.executemany(
-            "UPDATE reports SET decision_json = ?, confidence = ?, source = ?, flags = ? WHERE id = ?",
+            "UPDATE reports SET decision_json = ?, confidence = ?, source = ?, flags = ?, "
+            "english_gloss = COALESCE(?, english_gloss) WHERE id = ?",
             [
                 (
                     result.decision.model_dump_json(),
                     result.confidence,
                     result.source,
                     json.dumps(result.rules_fired),
+                    result.english_gloss,
                     report_id,
                 )
                 for report_id, result in items
