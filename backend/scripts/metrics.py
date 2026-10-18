@@ -6,16 +6,35 @@ from typing import Any
 
 from sklearn.metrics import confusion_matrix, precision_recall_fscore_support
 
-from app.models import DecisionResult
+from app.models import Decision, DecisionResult
 from scripts.dataset import LabeledReport
+
+# An approach that produced no answer for a report (LLM unavailable) is scored as
+# "not an emergency, no department": the worst safe-looking outcome.
+NO_ANSWER = DecisionResult(
+    decision=Decision(
+        is_emergency=False, emergency_prob=0.0, department="none", department_conf=0.0, severity=1, alert_now=False
+    ),
+    source="local",
+    confidence=0.0,
+    model="no-answer",
+)
+
+
+def triage_correct(row: LabeledReport, result: DecisionResult) -> bool:
+    """Emergency call right and, for real emergencies, the right department."""
+    d = result.decision
+    return d.is_emergency == row.is_emergency and (not row.is_emergency or d.department == row.department)
 
 DEPARTMENT_ORDER = ("fire", "police", "medical", "disaster", "utilities", "none")
 
 
 def evaluate(
-    rows: Sequence[LabeledReport], results: Sequence[DecisionResult], gate: float = 0.8
+    rows: Sequence[LabeledReport], answers: Sequence[DecisionResult | None], gate: float = 0.8
 ) -> dict[str, Any]:
     """Compute every triage metric in one pass plus sklearn summaries. O(n)."""
+    results = [a if a is not None else NO_ANSWER for a in answers]
+    triage_ok = [triage_correct(r, res) for r, res in zip(rows, results, strict=True)]
     truth_e = [r.is_emergency for r in rows]
     pred_e = [res.decision.is_emergency for res in results]
     precision, recall, f1, _ = precision_recall_fscore_support(
@@ -29,12 +48,17 @@ def evaluate(
     for language, idx in sorted(groups.items()):
         per_language[language] = {
             "n": len(idx),
+            "triage_acc": sum(triage_ok[i] for i in idx) / len(idx),
             "emergency_acc": sum(truth_e[i] == pred_e[i] for i in idx) / len(idx),
             "department_acc": sum(dept_ok[i] for i in idx) / len(idx),
         }
     confident = [i for i, res in enumerate(results) if res.confidence >= gate]
+    sos = [i for i, row in enumerate(rows) if row.silent_sos]
     return {
         "n": len(rows),
+        "unanswered": sum(a is None for a in answers),
+        "triage_acc": sum(triage_ok) / len(rows),
+        "silent_sos_caught": f"{sum(results[i].decision.silent_sos for i in sos)}/{len(sos)}",
         "emergency": {"precision": precision, "recall": recall, "f1": f1},
         "emergency_acc": sum(t == p for t, p in zip(truth_e, pred_e, strict=True)) / len(rows),
         "department_acc": sum(dept_ok) / len(rows),

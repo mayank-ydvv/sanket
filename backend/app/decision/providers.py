@@ -127,7 +127,8 @@ class GeminiProvider:
             provider=self.name,
             model=self.model,
             input_tokens=int(usage.get("promptTokenCount", 0)),
-            output_tokens=int(usage.get("candidatesTokenCount", 0)),
+            # Thinking tokens are billed as output.
+            output_tokens=int(usage.get("candidatesTokenCount", 0)) + int(usage.get("thoughtsTokenCount", 0)),
             latency_s=time.perf_counter() - start,
         )
 

@@ -240,6 +240,7 @@ class LLMDecider:
         batch_wait_s: float,
         max_concurrency: int,
         prompt_version: str = DECISION_PROMPT_VERSION,
+        output_cap_per_item: int = OUTPUT_CAP_PER_ITEM,
     ) -> None:
         self.chain = chain
         self.stats = stats
@@ -247,6 +248,7 @@ class LLMDecider:
         self._system = load_prompt(prompt_version)
         self._batch_size = batch_size
         self._batch_wait_s = batch_wait_s
+        self._output_cap_per_item = output_cap_per_item
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._queue: asyncio.Queue[_Pending] = asyncio.Queue()
         self._tasks: set[asyncio.Task[None]] = set()
@@ -305,7 +307,7 @@ class LLMDecider:
                         self._system,
                         user,
                         *self._estimate_tokens(user, len(todo)),
-                        max_output_tokens=OUTPUT_CAP_BASE + OUTPUT_CAP_PER_ITEM * len(todo),
+                        max_output_tokens=OUTPUT_CAP_BASE + self._output_cap_per_item * len(todo),
                     )
                 except AllProvidersFailed:
                     break

@@ -27,9 +27,11 @@ async def post_all(client: httpx.AsyncClient, rows: list[LabeledReport]) -> dict
     return dict(await asyncio.gather(*(post(r) for r in rows)))
 
 
-async def main(base_url: str, n: int, timeout_s: float) -> None:
+async def main(base_url: str, n: int, timeout_s: float, email: str | None, password: str | None) -> None:
     rows = load(TEST_PATH, include_hidden=False)[:n]
     async with httpx.AsyncClient(base_url=base_url, timeout=30) as client:
+        if email and password:  # dispatcher routes (/stats, GET /reports) need a session
+            (await client.post("/auth/login", json={"email": email, "password": password})).raise_for_status()
         before = (await client.get("/stats")).json()
         start = time.perf_counter()
         by_id = await post_all(client, rows)
@@ -67,5 +69,7 @@ if __name__ == "__main__":
     parser.add_argument("--base-url", default="http://127.0.0.1:8010")
     parser.add_argument("--n", type=int, default=100)
     parser.add_argument("--timeout", type=float, default=60.0)
+    parser.add_argument("--email", help="dispatcher account (needed unless AUTH_REQUIRED=false)")
+    parser.add_argument("--password")
     args = parser.parse_args()
-    asyncio.run(main(args.base_url, args.n, args.timeout))
+    asyncio.run(main(args.base_url, args.n, args.timeout, args.email, args.password))

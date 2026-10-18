@@ -204,3 +204,18 @@ async def test_daily_quota_429_parks_the_provider_for_15_minutes() -> None:
     with pytest.raises(ProviderError) as caught:
         await provider.complete("s", "u", 10)
     assert caught.value.retryable and caught.value.retry_after == QUOTA_EXHAUSTED_COOLDOWN_S
+
+
+async def test_gemini_thinking_tokens_count_as_output() -> None:
+    import httpx
+
+    from app.decision.providers import GeminiProvider
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "candidates": [{"content": {"parts": [{"text": "{}"}]}}],
+            "usageMetadata": {"promptTokenCount": 8, "candidatesTokenCount": 5, "thoughtsTokenCount": 104},
+        })
+
+    reply = await GeminiProvider(httpx.AsyncClient(transport=httpx.MockTransport(handler)), "k", "m", 5).complete("s", "u", 10)
+    assert (reply.input_tokens, reply.output_tokens) == (8, 109)
