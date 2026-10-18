@@ -1,28 +1,135 @@
 # Sanket — AI emergency triage agent
 
-Turns a flood of messy, multilingual emergency reports into a short, ranked list of
-de-duplicated incidents, each routed to the right department.
+Turns a flood of messy, multilingual emergency reports (calls, SMS, web) into a short,
+ranked list of de-duplicated incidents, each routed to the right department within about
+two seconds, on free-tier models. **System 1** (a local classifier plus a batched fast LLM
+for uncertain reports, then safety rules) decides every report. **System 2** (a reasoning
+model) looks only at complex incidents, links hazards across reports and writes crew
+briefings. Nothing is ever auto-dismissed. All data in this repo is synthetic.
 
-> Work in progress — built phase by phase. Full setup, architecture and demo guide land in Phase 10.
+## Quick start (3 commands)
 
-## Run locally
+Needs Python 3.12+ (tested on 3.14) and Node 20+.
 
 ```bash
-cp .env.example .env            # then set CALLER_SALT to a long random string
-python3 -m venv backend/.venv && backend/.venv/bin/pip install -r backend/requirements.txt
-(cd backend && .venv/bin/python -m scripts.gen_data && .venv/bin/python -m scripts.train_local)
-(cd backend && .venv/bin/uvicorn app.main:create_app --factory --port 8010)
-(cd frontend && npm install && npm run dev)   # http://localhost:5190
+git clone <this-repo> sanket && cd sanket
+./setup.sh
+./run.sh --demo
 ```
 
-Post a report:
+`setup.sh` creates `.env` with a random `CALLER_SALT` (if missing), installs the backend
+venv, trains the local classifier, caches the multilingual embedding model, installs the
+frontend and resets the database to a clean demo state. It prints the demo account at the
+end. Open <http://localhost:5190> and sign in.
+
+`./run.sh --demo` replays a recorded disaster run, so it needs **no API keys and no
+internet**. For live mode, add at least one LLM key to `.env` and run `./run.sh`.
+
+## Running the demo
+
+1. **Sign in** with the demo account (`demo@sanket.local`; the password is `DEMO_PASSWORD`
+   from `.env`, or the one `setup.sh` printed).
+2. **Overview → Disaster mode**: 500 reports about 12 flood events in five languages arrive
+   in 10 s. Watch the live feed, the KPIs and the cost ticker (actual tokens at list price
+   vs sending every report to a large reasoning model).
+3. **Incidents**: the ranked list and the map. Open an incident to see its merged reports
+   and the rules that fired, then the audit trail. Use the *Linked risk* filter to find
+   incidents where System 2 combined hazards (for example a fire plus a gas smell), and
+   read the 3-line crew briefing.
+4. **Alerts**: auto-dispatched incidents alert the department's first contact (mock
+   sender by default). Anything unacknowledged escalates after 90 s.
+5. **Benchmark**: accuracy vs cost for five approaches on the held-out test set.
+
+Reset between rehearsals: stop `run.sh` (Ctrl-C), then
+`(cd backend && .venv/bin/python -m scripts.seed_demo)`. The old database is moved to
+`backend/backups/`, never deleted.
+
+### Demo replay: when the Wi-Fi or the APIs fail
+
+`DEMO_CACHE=true` (what `./run.sh --demo` sets) serves every fast-LLM decision and every
+System 2 result from `backend/data/demo_run.jsonl` after the delay the provider took
+originally, instead of calling any provider. Nominatim and the Hugging Face hub are also switched off (the
+gazetteer still places district landmarks; the embedding model is the copy `setup.sh` cached). Everything else runs for real: the local
+model, rules, clustering, alerts, escalation, the WebSocket and the cost ticker (fed with
+the recorded token counts). The simulator is seeded, so Disaster mode sends the same
+reports and they hit the recording. A report that is not in the recording keeps its local
+decision and is flagged for review, exactly as when every provider is down.
+`GET /health` reports `"mode": "demo-replay"`.
+
+To record a fresh run (needs keys): delete `backend/data/demo_run.jsonl`, start
+`DEMO_RECORD=true ./run.sh`, press Disaster mode, and wait until the briefings stop
+arriving (on free tiers this takes several minutes).
+
+## Configuration (`.env`)
+
+Every setting is documented in [`.env.example`](.env.example). The important ones:
+
+| Variable | Default | What it does |
+|---|---|---|
+| `CALLER_SALT` | (required) | salt for hashing caller numbers; `setup.sh` generates one |
+| `SESSION_SECRET` | derived from the salt | signs dispatcher session cookies |
+| `DEMO_EMAIL` / `DEMO_PASSWORD` | `demo@sanket.local` / random | the account `seed_demo` creates |
+| `DEMO_CACHE` / `DEMO_RECORD` | `false` | replay / record the LLM layer (`DEMO_RUN_PATH`) |
+| `GROQ_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY` | empty | fast-LLM and reasoning providers; any subset works |
+| `CUSTOM_LLM_BASE_URL` / `_API_KEY` / `_MODEL` | empty | any OpenAI-compatible endpoint as an extra fallback |
+| `LLM_CHAIN`, `REASONING_CHAIN` | groq→gemini→openrouter→custom | provider order for System 1 and System 2 |
+| `CONF_THRESHOLD` | `0.8` | local confidence below this goes to the fast LLM |
+| `REASONING_ENABLED` | `true` | turn System 2 on or off |
+| `MOCK_ALERTS` | `true` | log alerts instead of sending SMS |
+| `TWILIO_*`, `PUBLIC_BASE_URL`, `ALERT_CONTACTS` | empty | voice/SMS intake and real SMS alerts |
+| `GEO_*`, `NOMINATIM_*` | Noida | demo district, viewbox and geocoder |
+| `AUTH_REQUIRED` | `true` | dispatcher routes need a session |
+
+With no LLM key at all, the app still runs: uncertain reports keep their local decision
+and go to the confirm or review lane.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Intake
+        Call[Voice call] --> STT[Groq Whisper / Sarvam STT]
+        SMS[SMS] --> API
+        Web[Web / curl] --> API
+        STT --> API[POST /reports]
+    end
+    API --> Q[(asyncio queue)]
+    Q --> W[Pipeline worker<br/>micro-batches]
+    subgraph S1[System 1: every report]
+        W --> L[Local TF-IDF + LR]
+        L -->|confident| R[Safety rules]
+        L -->|uncertain| B[LLM batcher<br/>25 items / 300 ms]
+        B --> FC[Fallback chain<br/>Groq → Gemini → OpenRouter → custom]
+        FC --> R
+    end
+    R --> G[Geocoder<br/>gazetteer → cache → Nominatim]
+    G --> C[Clustering index<br/>1 km grid + embeddings]
+    C --> DB[(SQLite WAL<br/>reports · incidents · alerts · audit)]
+    C --> AL[Alerts + 90 s escalation]
+    C --> S2[System 2 reasoner<br/>debounced, background]
+    S2 --> DB
+    C --> BC[Broadcaster<br/>≤ 10 batches/s, diffs]
+    AL --> BC
+    S2 --> BC
+    BC --> UI[React dashboard<br/>board · map · alerts · cost]
+    DEMO[(demo_run.jsonl)] -.->|DEMO_CACHE| B
+    DEMO -.->|DEMO_CACHE| S2
+```
+
+The local decision is placed on the board at once. LLM answers revise reports in place
+and re-cluster them when the department or location changes. Rules always run last and
+can only raise severity or add review flags.
+
+Tests: `cd backend && .venv/bin/pytest -q` (backend) and `npm --prefix frontend test`.
+
+Post a report by hand:
 
 ```bash
 curl -X POST localhost:8010/reports -H 'content-type: application/json' \
   -d '{"text":"aag lagi hai sector 18","channel":"sms","caller":"+919999999999"}'
 ```
 
-Tests: `cd backend && .venv/bin/pytest -q`
+# How it works
 
 ## Local classifier (System 1)
 
@@ -248,3 +355,25 @@ Marquee, Hyper Text), adapted for Vite in `frontend/src/components/magicui/`.
 
 Citizen intake (`POST /reports`, Twilio webhooks) stays public; every dispatcher route and the
 WebSocket require a session. `scripts/post_reports.py --email … --password …` logs in first.
+
+## Known limitations
+
+- **Free-tier throughput.** In a 500-report surge the free quotas run out within a minute.
+  System 1 degrades gracefully (local decisions stand and are flagged), but System 2
+  briefings can arrive minutes to hours late. Paid or self-hosted capacity fixes this.
+- **The local gate is narrow.** The local model is confident on only about 5% of held-out
+  phrasings, so most reports still reach the fast LLM. The hybrid is the most accurate
+  approach and the cheapest LLM one, but only about 20% cheaper than "fast LLM only".
+- **Unlocated reports** can be matched only by department and text. When several
+  same-department events are open at once, roughly 7–9% of them may join the wrong
+  incident. They are marked "location unconfirmed" for a callback, and dispatchers can split.
+- **Spoken numbers** are often mis-transcribed ("सेक्टर बासठ" became "सेक्तर बासक"), so voice
+  reports may need the LLM's location extraction or a callback.
+- **Synthetic data only.** The corpus, simulator and benchmark are generated. The
+  simulator reuses training phrasings, so Disaster mode shows behaviour, not accuracy.
+- **Demo replay** covers the seeded Disaster mode run. New free-text reports during
+  replay get local decisions only. Merge suggestions are not replayed, because incident
+  ids differ between runs.
+- **Twilio trial**: usually a US number, which only calls or texts verified phones.
+- **Single process, SQLite.** One API process holds the clustering index in memory. The
+  schema uses portable types, but scaling out needs Postgres and a shared index.
