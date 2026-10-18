@@ -120,8 +120,23 @@ class Broadcaster:
 router = APIRouter()
 
 
+async def _websocket_allowed(ws: WebSocket) -> bool:
+    """Same rule as the HTTP routes: a valid session cookie for an existing user."""
+    from app.auth import SESSION_COOKIE, read_session
+    from app.config import session_secret
+
+    settings = ws.app.state.settings
+    if not settings.auth_required:
+        return True
+    user_id = read_session(ws.cookies.get(SESSION_COOKIE), session_secret(settings))
+    return user_id is not None and await ws.app.state.db.user_by_id(user_id) is not None
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
+    if not await _websocket_allowed(ws):
+        await ws.close(code=4401, reason="please log in")
+        return
     hub: Hub = ws.app.state.hub
     await hub.connect(ws)
     try:

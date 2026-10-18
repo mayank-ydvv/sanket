@@ -65,6 +65,13 @@ CREATE TABLE IF NOT EXISTS audit_log (
     after TEXT,
     at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS geocode_cache (
     query TEXT PRIMARY KEY,
     lat REAL,
@@ -344,6 +351,12 @@ class Database:
     async def set_incident_status(self, incident_id: str, status: str) -> None:
         await self._conn.execute("UPDATE incidents SET status = ? WHERE id = ?", (status, incident_id))
 
+    async def create_user(self, user_id: str, name: str, email: str, password_hash: str) -> None:
+        await self._conn.execute(
+            "INSERT INTO users (id, name, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+            (user_id, name, email, password_hash, time.time()),
+        )
+
     async def geocode_cache_put(self, query: str, lat: float | None, lng: float | None) -> None:
         await self._conn.execute(
             "INSERT OR REPLACE INTO geocode_cache (query, lat, lng, at) VALUES (?, ?, ?, ?)",
@@ -430,6 +443,14 @@ class Database:
         """Cached (lat, lng) for a normalised query; (None, None) is a cached miss. O(log n)."""
         rows = await self._fetch("SELECT lat, lng FROM geocode_cache WHERE query = ?", (query,))
         return (rows[0]["lat"], rows[0]["lng"]) if rows else None
+
+    async def user_by_email(self, email: str) -> sqlite3.Row | None:
+        rows = await self._fetch("SELECT id, name, email, password_hash FROM users WHERE email = ?", (email,))
+        return rows[0] if rows else None
+
+    async def user_by_id(self, user_id: str) -> sqlite3.Row | None:
+        rows = await self._fetch("SELECT id, name, email FROM users WHERE id = ?", (user_id,))
+        return rows[0] if rows else None
 
     async def table_names(self) -> list[str]:
         rows = await self._fetch("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")

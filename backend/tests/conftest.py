@@ -46,6 +46,7 @@ def settings(tmp_path: Path) -> Settings:
         ingest_batch_wait_ms=10,
         embedding_backend="hashing",
         geocode_network=False,
+        auth_required=False,  # behaviour tests; tests/test_auth.py covers sign-in
     )
 
 
