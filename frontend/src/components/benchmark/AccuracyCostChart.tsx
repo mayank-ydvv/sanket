@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useI18n } from "@/lib/i18n";
 import { formatInr } from "@/lib/store";
 import { type ApproachResult, HYBRID, latencyLabel } from "./types";
 
@@ -13,6 +14,7 @@ const FREE_BAND = 80; // column for approaches that cost nothing
  * only Sanket is highlighted (accent), the rest are neutral.
  */
 export function AccuracyCostChart({ data }: { data: ApproachResult[] }) {
+  const { t: tr } = useI18n();
   const [hover, setHover] = useState<string | null>(null);
   const paid = data.filter((d) => d.cost_per_1000_inr > 0);
   const minCost = Math.min(...paid.map((d) => d.cost_per_1000_inr), 1) / 2;
@@ -55,7 +57,7 @@ export function AccuracyCostChart({ data }: { data: ApproachResult[] }) {
 
   return (
     <div className="relative">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Triage accuracy versus cost per 1,000 reports">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={tr("bench.chartLabel")}>
         {yTicks.map((t) => (
           <g key={t}>
             <line x1={M.left} x2={W - M.right} y1={y(t)} y2={y(t)} stroke="var(--line)" />
@@ -66,7 +68,7 @@ export function AccuracyCostChart({ data }: { data: ApproachResult[] }) {
         ))}
         <rect x={M.left} y={M.top} width={FREE_BAND - 12} height={H - M.top - M.bottom} rx={8} fill="var(--surface-2)" />
         <text x={M.left + FREE_BAND / 2 - 6} y={H - M.bottom + 20} textAnchor="middle" fontSize={11} fill="var(--mute)">
-          ₹0 · no LLM
+          {tr("bench.free")}
         </text>
         {xTicks.map((t) => (
           <text key={t} x={x(t)} y={H - M.bottom + 20} textAnchor="middle" fontSize={11} fill="var(--mute)">
@@ -74,10 +76,10 @@ export function AccuracyCostChart({ data }: { data: ApproachResult[] }) {
           </text>
         ))}
         <text x={(plotLeft + W - M.right) / 2} y={H - 12} textAnchor="middle" fontSize={12} fill="var(--mute)">
-          Cost per 1,000 reports (list price, log scale)
+          {tr("bench.axisX")}
         </text>
         <text transform={`translate(16 ${(M.top + H - M.bottom) / 2}) rotate(-90)`} textAnchor="middle" fontSize={12} fill="var(--mute)">
-          Triage accuracy
+          {tr("bench.axisY")}
         </text>
         {data.map((d) => {
           const isHybrid = d.approach === HYBRID;
@@ -125,7 +127,7 @@ export function AccuracyCostChart({ data }: { data: ApproachResult[] }) {
         >
           <p className="font-semibold text-ink">{hovered.approach}</p>
           <p className="mt-1 text-ink-2">
-            Triage {(hovered.triage_acc * 100).toFixed(1)}% · recall {(hovered.emergency.recall * 100).toFixed(0)}%
+            {tr("bench.tip", { acc: (hovered.triage_acc * 100).toFixed(1), recall: (hovered.emergency.recall * 100).toFixed(0) })}
           </p>
           <p className="text-ink-2">
             {formatInr(hovered.cost_per_1000_inr)} / 1,000 · p95 {latencyLabel(hovered.latency_ms.p95)}

@@ -8,12 +8,29 @@ import { MagicCard } from "@/components/magicui/magic-card";
 import { Ripple } from "@/components/magicui/ripple";
 import { Button } from "@/components/ui/Button";
 import { Logo } from "@/components/ui/Logo";
+import { LanguageToggle } from "@/components/ui/LanguageToggle";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { type Translate, useI18n } from "@/lib/i18n";
+import type { MessageKey } from "@/lib/messages";
 import { useTheme } from "@/lib/theme";
 
+/** Server messages the UI knows how to say in the chosen language. */
+const API_ERRORS: Record<string, MessageKey> = {
+  "wrong email or password": "auth.err.wrong",
+  "too many attempts, try again in a few minutes": "auth.err.throttled",
+  "an account with this email already exists": "auth.err.exists",
+};
+
+function errorText(exc: unknown, t: Translate): string {
+  if (!(exc instanceof ApiError)) return t("auth.error");
+  const known = API_ERRORS[exc.message];
+  return known ? t(known) : exc.message;
+}
+
 function Field({
+  id,
   label,
   type = "text",
   value,
@@ -21,6 +38,7 @@ function Field({
   autoComplete,
   hint,
 }: {
+  id: string;
   label: string;
   type?: string;
   value: string;
@@ -28,9 +46,9 @@ function Field({
   autoComplete: string;
   hint?: string;
 }) {
+  const { t } = useI18n();
   const [visible, setVisible] = useState(false);
   const isPassword = type === "password";
-  const id = label.toLowerCase().replace(/\s+/g, "-");
   return (
     <label htmlFor={id} className="block">
       <span className="text-sm font-medium text-ink-2">{label}</span>
@@ -48,7 +66,7 @@ function Field({
           <button
             type="button"
             onClick={() => setVisible((v) => !v)}
-            aria-label={visible ? "Hide password" : "Show password"}
+            aria-label={visible ? t("auth.hidePassword") : t("auth.showPassword")}
             className="absolute inset-y-0 right-0 grid w-11 place-items-center text-mute hover:text-ink"
           >
             {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
@@ -61,6 +79,7 @@ function Field({
 }
 
 export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
+  const { t, lang } = useI18n();
   const { user, loading, login, signup } = useAuth();
   const { resolved } = useTheme();
   const navigate = useNavigate();
@@ -83,7 +102,7 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
       else await login(email, password);
       navigate(next, { replace: true });
     } catch (exc) {
-      setError(exc instanceof ApiError ? exc.message : "Something went wrong. Is the API running?");
+      setError(errorText(exc, t));
     } finally {
       setBusy(false);
     }
@@ -111,20 +130,25 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
               </svg>
             </span>
           </div>
-          <HyperText as="p" startOnView animateOnHover={false} className="font-display text-sm font-bold tracking-[0.4em] text-accent">
-            SIGNAL IN THE NOISE
-          </HyperText>
-          <p className="mt-3 max-w-md font-display text-3xl font-bold leading-tight tracking-tight">
-            Every call heard. Every incident ranked. Humans decide.
-          </p>
+          {lang === "en" ? (
+            <HyperText as="p" startOnView animateOnHover={false} className="font-display text-sm font-bold tracking-[0.4em] text-accent">
+              {t("auth.tagline")}
+            </HyperText>
+          ) : (
+            <p className="py-2 font-display text-sm font-bold text-accent">{t("auth.tagline")}</p>
+          )}
+          <p className="mt-3 max-w-md font-display text-3xl font-bold leading-tight tracking-tight">{t("auth.pitch")}</p>
         </div>
-        <p className="relative text-sm text-mute">Synthetic demo data only. Never enter real caller details.</p>
+        <p className="relative text-sm text-mute">{t("auth.synthetic")}</p>
       </aside>
 
       <main className="flex flex-col px-4 py-6 sm:px-8">
         <div className="flex items-center justify-between">
           <Logo className="lg:invisible" />
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            <LanguageToggle />
+            <ThemeToggle />
+          </div>
         </div>
         <div className="flex flex-1 items-center justify-center py-10">
           <BlurFade className="w-full max-w-md">
@@ -137,21 +161,22 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
               <form onSubmit={submit} className="space-y-5 p-7 sm:p-8">
                 <div>
                   <h1 className="font-display text-2xl font-bold tracking-tight">
-                    {isSignup ? "Create your account" : "Welcome back"}
+                    {isSignup ? t("auth.signupTitle") : t("auth.loginTitle")}
                   </h1>
                   <p className="mt-1.5 text-sm text-mute">
-                    {isSignup ? "Dispatchers sign up to use the control room." : "Log in to the Sanket control room."}
+                    {isSignup ? t("auth.signupSub") : t("auth.loginSub")}
                   </p>
                 </div>
-                {isSignup && <Field label="Full name" value={name} onChange={setName} autoComplete="name" />}
-                <Field label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" />
+                {isSignup && <Field id="name" label={t("auth.name")} value={name} onChange={setName} autoComplete="name" />}
+                <Field id="email" label={t("auth.email")} type="email" value={email} onChange={setEmail} autoComplete="email" />
                 <Field
-                  label="Password"
+                  id="password"
+                  label={t("auth.password")}
                   type="password"
                   value={password}
                   onChange={setPassword}
                   autoComplete={isSignup ? "new-password" : "current-password"}
-                  hint={isSignup ? "At least 8 characters." : undefined}
+                  hint={isSignup ? t("auth.passwordHint") : undefined}
                 />
                 {error && (
                   <p role="alert" className="rounded-xl border border-danger/30 bg-danger/10 px-3.5 py-2.5 text-sm text-danger">
@@ -160,12 +185,12 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
                 )}
                 <Button type="submit" size="lg" className="w-full" disabled={busy}>
                   {busy ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
-                  {isSignup ? "Create account" : "Log in"}
+                  {isSignup ? t("auth.create") : t("auth.login")}
                 </Button>
                 <p className="text-center text-sm text-mute">
-                  {isSignup ? "Already have an account? " : "New here? "}
+                  {isSignup ? t("auth.haveAccount") : t("auth.newHere")}
                   <Link to={isSignup ? "/login" : "/signup"} state={location.state} className="font-medium text-accent hover:underline">
-                    {isSignup ? "Log in" : "Create an account"}
+                    {isSignup ? t("auth.login") : t("auth.createLink")}
                   </Link>
                 </p>
               </form>

@@ -1,5 +1,8 @@
 # Sanket benchmark
 
+> Measured on the earlier Noida version of the synthetic dataset, before the move to Chennai.
+> The re-run on the Chennai dataset is pending.
+
 Held-out test set: 250 synthetic reports in 5 languages (50 of them never used during development), streamed at 25 reports/s. Run 2026-10-18 14:40 IST. Free-tier APIs; cost is list price for the tokens the providers reported.
 
 | Approach | Triage acc | Hidden-50 | Emergency P / R / F1 | Dept acc | Severity MAE | Silent SOS | p50 / p95 latency | LLM calls | ₹ per 1,000 |
