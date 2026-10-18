@@ -171,7 +171,7 @@ class FallbackChain:
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self.slots = list(slots)
-        self._stats = stats
+        self.stats = stats
         self._max_queue_wait_s = max_queue_wait_s
         self._clock = clock
         self._sleep = sleep
@@ -200,18 +200,18 @@ class FallbackChain:
                 continue
             if wait > 0:
                 await self._sleep(wait)
-            self._stats.calls[name] += 1
+            self.stats.calls[name] += 1
             cap = min(max_output_tokens, slot.limiter.max_output_tokens or max_output_tokens)
             try:
                 reply = await slot.provider.complete(system, user, cap)
             except ProviderError as error:
-                self._stats.failures[name] += 1
+                self.stats.failures[name] += 1
                 log.warning("LLM provider failed: %s", error)
                 self._cool_down(slot, error)
                 continue
             slot.failures = 0
-            self._stats.input_tokens[name] += reply.input_tokens
-            self._stats.output_tokens[name] += reply.output_tokens
+            self.stats.input_tokens[name] += reply.input_tokens
+            self.stats.output_tokens[name] += reply.output_tokens
             return reply
         raise AllProvidersFailed("no LLM provider available")
 

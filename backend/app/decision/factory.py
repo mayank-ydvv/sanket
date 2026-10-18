@@ -1,5 +1,7 @@
 """Builds the fast-LLM decider from settings. Providers without a key are skipped."""
 
+from collections.abc import Sequence
+
 import httpx
 
 from app.config import Settings
@@ -7,12 +9,24 @@ from app.decision.llm import FallbackChain, LLMDecider, LLMStats, ProviderSlot
 from app.decision.providers import GeminiProvider, OpenAICompatibleProvider, Provider, RateLimiter
 
 
-def build_slots(settings: Settings, http: httpx.AsyncClient) -> list[ProviderSlot]:
-    """Providers with a key, in ``settings.llm_chain`` order (default Groq first: fastest)."""
+def build_slots(
+    settings: Settings,
+    http: httpx.AsyncClient,
+    *,
+    order: Sequence[str] | None = None,
+    gemini_models: Sequence[str] | None = None,
+    limiters: dict[str, RateLimiter] | None = None,
+) -> list[ProviderSlot]:
+    """Providers with a key, in ``order`` (default ``settings.llm_chain``: Groq first, fastest).
+
+    ``limiters`` is shared between chains so the fast path and the reasoning layer
+    draw on one quota per provider/model instead of each assuming it has it all.
+    """
     timeout = settings.llm_timeout_s
+    shared = {} if limiters is None else limiters
     slots: list[tuple[Provider, int, int, int | None]] = []
     if settings.gemini_api_key:
-        for model in settings.gemini_models:
+        for model in gemini_models if gemini_models is not None else settings.gemini_models:
             slots.append(
                 (
                     GeminiProvider(http, settings.gemini_api_key, model, timeout),
@@ -57,13 +71,18 @@ def build_slots(settings: Settings, http: httpx.AsyncClient) -> list[ProviderSlo
                 None,
             )
         )
-    rank = {name: i for i, name in enumerate(settings.llm_chain)}
+    rank = {name: i for i, name in enumerate(order if order is not None else settings.llm_chain)}
     ordered = sorted((s for s in slots if s[0].name in rank), key=lambda s: rank[s[0].name])
-    return [ProviderSlot(provider, RateLimiter(rpm, tpm, otpm)) for provider, rpm, tpm, otpm in ordered]
+    return [
+        ProviderSlot(provider, shared.setdefault(f"{provider.name}/{provider.model}", RateLimiter(rpm, tpm, otpm)))
+        for provider, rpm, tpm, otpm in ordered
+    ]
 
 
-def build_llm_decider(settings: Settings, http: httpx.AsyncClient) -> LLMDecider | None:
-    slots = build_slots(settings, http)
+def build_llm_decider(
+    settings: Settings, http: httpx.AsyncClient, limiters: dict[str, RateLimiter] | None = None
+) -> LLMDecider | None:
+    slots = build_slots(settings, http, limiters=limiters)
     if not slots:
         return None
     stats = LLMStats()
@@ -75,3 +94,17 @@ def build_llm_decider(settings: Settings, http: httpx.AsyncClient) -> LLMDecider
         batch_wait_s=settings.llm_batch_wait_ms / 1000,
         max_concurrency=settings.llm_max_concurrency,
     )
+
+
+def build_reasoning_chain(
+    settings: Settings, http: httpx.AsyncClient, limiters: dict[str, RateLimiter] | None = None
+) -> FallbackChain | None:
+    """System 2 chain: Gemini Flash first, then the free OpenRouter model, then Groq."""
+    slots = build_slots(
+        settings,
+        http,
+        order=settings.reasoning_chain,
+        gemini_models=[settings.reasoning_gemini_model],
+        limiters=limiters,
+    )
+    return FallbackChain(slots, LLMStats(), settings.reasoning_max_queue_wait_s) if slots else None

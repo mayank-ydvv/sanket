@@ -13,6 +13,9 @@ from typing import Any, Protocol
 import httpx
 
 RETRYABLE_STATUS = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
+# A 429 that means "daily/plan quota used up" (not a per-minute limit): no point retrying soon.
+QUOTA_EXHAUSTED_HINTS = ("exceeded your current quota", "check your plan and billing", "per day")
+QUOTA_EXHAUSTED_COOLDOWN_S = 900.0
 
 
 @dataclass(frozen=True)
@@ -68,11 +71,14 @@ async def _post_json(
         raise ProviderError(provider, f"transport error: {exc!r}", retryable=True) from exc
     if response.status_code >= 400:
         detail = " ".join(response.text.split())[:200]
+        retry_after = _retry_after(response)
+        if response.status_code == 429 and any(h in response.text.lower() for h in QUOTA_EXHAUSTED_HINTS):
+            retry_after = max(retry_after or 0.0, QUOTA_EXHAUSTED_COOLDOWN_S)
         raise ProviderError(
             provider,
             f"HTTP {response.status_code}: {detail}",
             retryable=response.status_code in RETRYABLE_STATUS,
-            retry_after=_retry_after(response),
+            retry_after=retry_after,
         )
     try:
         data: dict[str, Any] = response.json()

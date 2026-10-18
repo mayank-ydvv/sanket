@@ -190,3 +190,17 @@ def test_truncated_reply_keeps_complete_items() -> None:
     truncated = full[: full.rindex("{") + 12]  # third object cut mid-way
     assert sorted(parse_decisions(truncated, 3)) == [0, 1]
     assert parse_decisions("Sure! {oops", 3) == {}
+
+
+async def test_daily_quota_429_parks_the_provider_for_15_minutes() -> None:
+    import httpx
+
+    from app.decision.providers import QUOTA_EXHAUSTED_COOLDOWN_S, GeminiProvider
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, json={"error": {"message": "You exceeded your current quota, please check your plan and billing details."}})
+
+    provider = GeminiProvider(httpx.AsyncClient(transport=httpx.MockTransport(handler)), "k", "m", 5)
+    with pytest.raises(ProviderError) as caught:
+        await provider.complete("s", "u", 10)
+    assert caught.value.retryable and caught.value.retry_after == QUOTA_EXHAUSTED_COOLDOWN_S
