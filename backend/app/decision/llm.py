@@ -15,12 +15,15 @@ from collections import Counter
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.decision.providers import Provider, ProviderError, ProviderReply, RateLimiter
 from app.models import Decision, Department
+
+if TYPE_CHECKING:
+    from app.demo import DemoRecorder
 
 log = logging.getLogger(__name__)
 
@@ -223,6 +226,14 @@ class LLMOutcome:
     model: str
 
 
+class Decider(Protocol):
+    """What the pipeline needs from System 1's LLM stage (live batcher or demo replay)."""
+
+    prompt_version: str
+
+    async def decide(self, texts: Sequence[str]) -> list[LLMOutcome | None]: ...
+
+
 @dataclass
 class _Pending:
     text: str
@@ -241,8 +252,10 @@ class LLMDecider:
         max_concurrency: int,
         prompt_version: str = DECISION_PROMPT_VERSION,
         output_cap_per_item: int = OUTPUT_CAP_PER_ITEM,
+        recorder: "DemoRecorder | None" = None,
     ) -> None:
         self.chain = chain
+        self._recorder = recorder
         self.stats = stats
         self.prompt_version = prompt_version
         self._system = load_prompt(prompt_version)
@@ -313,7 +326,10 @@ class LLMDecider:
                     break
                 decisions = parse_decisions(reply.text, len(todo))
                 for local_idx, decision in decisions.items():
-                    outcomes[todo[local_idx]] = LLMOutcome(decision, reply.provider, reply.model)
+                    outcome = LLMOutcome(decision, reply.provider, reply.model)
+                    outcomes[todo[local_idx]] = outcome
+                    if self._recorder is not None:
+                        self._recorder.decision(batch[todo[local_idx]].text, outcome, reply, len(todo))
                 todo = [todo[i] for i in range(len(todo)) if i not in decisions]
                 if not todo:
                     break

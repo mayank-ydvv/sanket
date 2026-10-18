@@ -15,7 +15,7 @@ EXPECTED_TABLES = {"reports", "incidents", "alerts", "audit_log", "geocode_cache
 
 
 def test_health(client: TestClient) -> None:
-    assert client.get("/health").json() == {"status": "ok"}
+    assert client.get("/health").json() == {"status": "ok", "mode": "live"}
 
 
 async def test_migration_is_idempotent(tmp_path: Path) -> None:

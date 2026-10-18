@@ -16,6 +16,7 @@ import logging
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from app.cluster.index import haversine_km
 from app.cluster.service import IncidentService
@@ -25,6 +26,9 @@ from app.models import Incident
 from app.reasoning.prompting import REASONING_PROMPT_VERSION, build_message, parse_reasoning
 from app.ws import Broadcaster
 
+if TYPE_CHECKING:
+    from app.demo import DemoCache, DemoRecorder
+
 log = logging.getLogger(__name__)
 
 CHARS_PER_TOKEN = 2.5
@@ -32,6 +36,7 @@ MAX_OUTPUT_TOKENS = 700
 SAMPLES_PER_NEIGHBOUR = 2
 MAX_NEIGHBOURS = 4
 MAX_BACKOFF_S = 300.0
+REPLAY_MAX_DELAY_S = 8.0
 
 Signature = tuple[int, tuple[str, ...]]
 
@@ -67,8 +72,13 @@ class Reasoner:
         config: ReasonerConfig,
         clock: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], float] = time.time,
+        recorder: "DemoRecorder | None" = None,
+        replay: "DemoCache | None" = None,
     ) -> None:
         self._incidents = incidents
+        self._recorder = recorder
+        self._replay = replay
+        self._replayed: set[str] = set()  # incidents already given their recorded answer
         self._db = db
         self.chain = chain
         self._broadcaster = broadcaster
@@ -180,6 +190,8 @@ class Reasoner:
         if incident.status == "merged":
             return None
         signature = self.signature(incident)
+        if self._replay is not None:
+            return await self._reason_from_recording(self._replay, incident, signature)
         nearby = await self._neighbour_samples(incident)
         user = build_message(incident, reports, nearby, self._wall())
         est_input = int((len(self._system) + len(user)) / CHARS_PER_TOKEN)
@@ -206,15 +218,47 @@ class Reasoner:
                 actor=model,
                 prompt_version=REASONING_PROMPT_VERSION,
             )
-            self._last_signature[incident_id] = signature
-            self._deferrals.pop(incident_id, None)
-            self.stats.applied += 1
-            self._broadcaster.publish("incident.updated", updated.model_dump(mode="json"))
-            return updated
+            if self._recorder is not None:
+                self._recorder.reasoning(incident.title, parsed, reply)
+            return self._applied(incident_id, signature, updated)
         # The model answered twice but neither answer was usable: back off too.
         self.stats.failed += 1
         self._retry_later(incident_id)
         return None
+
+    def _applied(self, incident_id: str, signature: Signature, updated: Incident) -> Incident:
+        self._last_signature[incident_id] = signature
+        self._deferrals.pop(incident_id, None)
+        self.stats.applied += 1
+        self._broadcaster.publish("incident.updated", updated.model_dump(mode="json"))
+        return updated
+
+    async def _reason_from_recording(
+        self, replay: "DemoCache", incident: Incident, signature: Signature
+    ) -> Incident | None:
+        """Demo replay: apply the answer recorded for this incident title after the
+        recorded delay. No recording means no answer, and no network call either."""
+        self.stats.runs += 1
+        recorded = replay.reasoning.get(incident.title)
+        if recorded is None or incident.id in self._replayed:
+            self._last_signature[incident.id] = signature  # don't retry until new reports arrive
+            self.stats.skipped_unchanged += 1
+            return None
+        self._replayed.add(incident.id)
+        await asyncio.sleep(min(REPLAY_MAX_DELAY_S, recorded.latency_s))
+        recorded.charge(self.chain.stats)
+        model = f"{recorded.provider}/{recorded.model}"
+        self.stats.by_model[model] = self.stats.by_model.get(model, 0) + 1
+        updated = await self._incidents.apply_reasoning(
+            incident.id,
+            risk_hazards=recorded.output.linked_hazards,
+            combined_risk=recorded.output.combined_risk,
+            merge_suggestions=[],
+            briefing=recorded.output.briefing,
+            actor=f"{model} (demo replay)",
+            prompt_version=REASONING_PROMPT_VERSION,
+        )
+        return self._applied(incident.id, signature, updated)
 
     async def _neighbour_samples(self, incident: Incident) -> list[tuple[Incident, float, list[str]]]:
         """Nearby incidents with distance and a couple of their newest report texts."""

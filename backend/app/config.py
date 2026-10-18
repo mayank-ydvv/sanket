@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 class Settings(BaseSettings):
     """All runtime configuration. Secrets have no defaults and must come from the env."""
 
-    model_config = SettingsConfigDict(env_file=ROOT / ".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=ROOT / ".env", extra="ignore", env_ignore_empty=True)  # "KEY=" means unset
 
     caller_salt: str = Field(min_length=16)
     # Dispatcher accounts. Without SESSION_SECRET, one is derived from CALLER_SALT.
@@ -25,8 +25,15 @@ class Settings(BaseSettings):
     session_ttl_s: float = Field(7 * 24 * 3600, gt=0)
     cookie_secure: bool = False  # set true when served over https
     auth_required: bool = True
+    # Demo account created by scripts/seed_demo.py (a random password is printed if unset).
+    demo_email: str = "demo@sanket.local"
+    demo_password: str | None = Field(None, min_length=8)
     db_path: Path = Path("backend/sanket.db")
     local_model_path: Path = Path("backend/artifacts/local_v1.joblib")
+    # Demo safety net: record the LLM answers of a live run, replay them with no network.
+    demo_record: bool = False
+    demo_cache: bool = False
+    demo_run_path: Path = Path("backend/data/demo_run.jsonl")
     cors_origins: list[str] = ["http://localhost:5190"]
     ingest_batch_size: int = Field(25, ge=1)
     ingest_batch_wait_ms: int = Field(50, ge=0)
@@ -138,7 +145,7 @@ class Settings(BaseSettings):
     custom_llm_rpm: int = 30
     custom_llm_tpm: int = 100_000
 
-    @field_validator("db_path", "local_model_path")
+    @field_validator("db_path", "local_model_path", "demo_run_path")
     @classmethod
     def _resolve_path(cls, value: Path) -> Path:
         return value if value.is_absolute() else ROOT / value

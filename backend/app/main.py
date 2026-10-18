@@ -22,6 +22,8 @@ from app.cluster.service import IncidentService
 from app.config import Settings, get_settings
 from app.db import Database
 from app.decision.factory import build_llm_decider, build_reasoning_chain
+from app.decision.llm import FallbackChain, LLMDecider, LLMStats
+from app.demo import DemoCache, DemoRecorder, ReplayDecider
 from app.decision.providers import RateLimiter
 from app.reasoning.scheduler import Reasoner, ReasonerConfig
 from app.decision.local import LocalClassifier
@@ -90,7 +92,16 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
         hub = ws.Hub()
         broadcaster = ws.Broadcaster(hub)
         limiters: dict[str, RateLimiter] = {}  # one quota per provider/model, shared by both systems
-        llm = build_llm_decider(cfg, http, limiters)
+        recorder = DemoRecorder(cfg.demo_run_path) if cfg.demo_record and not cfg.demo_cache else None
+        replay = DemoCache.load(cfg.demo_run_path) if cfg.demo_cache else None
+        llm: LLMDecider | ReplayDecider | None
+        if replay is not None:
+            llm = ReplayDecider(replay)
+            log.warning("DEMO_CACHE=true: replaying recorded LLM answers from %s, no provider calls", cfg.demo_run_path)
+        else:
+            llm = build_llm_decider(cfg, http, limiters, recorder)
+        if recorder is not None:
+            log.warning("DEMO_RECORD=true: appending LLM answers to %s", recorder.path)
         if llm is None:
             log.warning("no LLM provider configured; uncertain reports keep their local decision")
         else:
@@ -106,7 +117,7 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
                 district=cfg.geo_district,
                 viewbox=cfg.geo_viewbox,
                 max_wait_s=cfg.geocode_max_wait_s,
-                network=cfg.geocode_network,
+                network=cfg.geocode_network and replay is None,
             ),
         )
         index = IncidentIndex(
@@ -123,7 +134,11 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
             db, incidents, broadcaster, build_sender(cfg, http), cfg.alert_contacts, cfg.alert_ack_timeout_s
         )
         log.info("resumed %d alert escalation timers", await alerts.restore())
-        reasoning_chain = build_reasoning_chain(cfg, http, limiters) if cfg.reasoning_enabled else None
+        reasoning_chain: FallbackChain | None = None
+        if cfg.reasoning_enabled:
+            reasoning_chain = (
+                FallbackChain([], LLMStats(), 0.0) if replay is not None else build_reasoning_chain(cfg, http, limiters)
+            )
         reasoner = (
             Reasoner(
                 incidents,
@@ -139,6 +154,8 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
                     max_reports=cfg.reasoning_max_reports,
                     concurrency=cfg.reasoning_concurrency,
                 ),
+                recorder=recorder,
+                replay=replay,
             )
             if reasoning_chain is not None
             else None
@@ -162,6 +179,7 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
         if llm is not None:
             tasks.append(asyncio.create_task(llm.run(), name="llm-batcher"))
         app.state.settings = cfg
+        app.state.mode = "demo-replay" if replay is not None else ("recording" if recorder is not None else "live")
         app.state.llm = llm
         app.state.reasoner = reasoner
         app.state.db = db
@@ -201,6 +219,8 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
                     await task
             await http.aclose()
             await db.close()
+            if recorder is not None:
+                recorder.close()
 
     app = FastAPI(title="Sanket", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
@@ -212,12 +232,13 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
 
     @app.get("/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok"}
+        return {"status": "ok", "mode": getattr(app.state, "mode", "starting")}
 
     @app.get("/stats", dependencies=[auth_api.require_user])
     async def stats() -> dict[str, object]:
         llm = app.state.llm
         return {
+            "mode": app.state.mode,
             "reports_decided": app.state.worker.processed,
             "reports_revised": app.state.triage.revised,
             "broadcast": {"published": app.state.broadcaster.published, "flushes": app.state.broadcaster.flushes},

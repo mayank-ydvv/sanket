@@ -6,6 +6,7 @@ import httpx
 
 from app.config import Settings
 from app.decision.llm import FallbackChain, LLMDecider, LLMStats, ProviderSlot
+from app.demo import DemoRecorder
 from app.decision.providers import GeminiProvider, OpenAICompatibleProvider, Provider, RateLimiter
 
 
@@ -80,7 +81,10 @@ def build_slots(
 
 
 def build_llm_decider(
-    settings: Settings, http: httpx.AsyncClient, limiters: dict[str, RateLimiter] | None = None
+    settings: Settings,
+    http: httpx.AsyncClient,
+    limiters: dict[str, RateLimiter] | None = None,
+    recorder: DemoRecorder | None = None,
 ) -> LLMDecider | None:
     slots = build_slots(settings, http, limiters=limiters)
     if not slots:
@@ -93,6 +97,7 @@ def build_llm_decider(
         batch_size=settings.llm_batch_size,
         batch_wait_s=settings.llm_batch_wait_ms / 1000,
         max_concurrency=settings.llm_max_concurrency,
+        recorder=recorder,
     )
 
 

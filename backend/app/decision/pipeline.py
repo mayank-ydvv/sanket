@@ -9,7 +9,7 @@ callers that want the final answer directly (tests, benchmark).
 import asyncio
 from collections.abc import Sequence
 
-from app.decision.llm import LLMDecider
+from app.decision.llm import Decider
 from app.decision.local import LocalClassifier
 from app.decision.rules import SafetyRules
 from app.models import Decision, DecisionResult, Report
@@ -39,7 +39,7 @@ class DecisionPipeline:
     def __init__(
         self,
         local: LocalClassifier | None,
-        llm: LLMDecider | None,
+        llm: Decider | None,
         rules: SafetyRules,
         conf_threshold: float,
     ) -> None:

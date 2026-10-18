@@ -162,7 +162,7 @@ def test_local_decision_first_then_llm_revision_and_auto_dispatch(
         return await answer(system, user, max_output_tokens)
 
     provider.complete = slow_complete  # type: ignore[method-assign]
-    monkeypatch.setattr(main_module, "build_llm_decider", lambda cfg, http, limiters: make_decider(provider))
+    monkeypatch.setattr(main_module, "build_llm_decider", lambda cfg, http, limiters, recorder=None: make_decider(provider))
     with TestClient(create_app(settings)) as client, client.websocket_connect("/ws") as ws:
         report_id = client.post("/reports", json={"text": "Sector 18 metro pe kuch ho gaya, jaldi aao"}).json()["id"]
         first = receive_event(ws, "report.created")["data"]
