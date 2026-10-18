@@ -10,6 +10,7 @@ from app.cluster.service import IncidentService
 from app.db import Database
 from app.deps import get_alerts, get_broadcaster, get_db, get_incidents
 from app.models import Alert, Incident, IncidentDetail, IncidentStatus, OverrideRequest
+from app.translate import MAX_BATCH, Translator
 from app.ws import Broadcaster
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
@@ -24,6 +25,12 @@ class SplitRequest(BaseModel):
 class SplitResult(BaseModel):
     original: Incident
     new: Incident
+
+
+class TranslateResult(BaseModel):
+    translated: int
+    pending: int  # still untranslated (provider unavailable, or more than one batch)
+    available: bool
 
 
 class MergeRequest(BaseModel):
@@ -135,6 +142,41 @@ async def split_incident(
     broadcaster.publish("incident.updated", original.model_dump(mode="json"))
     broadcaster.publish("incident.created", new.model_dump(mode="json"))
     return SplitResult(original=original, new=new)
+
+
+@router.post("/{incident_id}/translate")
+async def translate_incident(
+    incident_id: str,
+    request: Request,
+    db: Annotated[Database, Depends(get_db)],
+    broadcaster: Annotated[Broadcaster, Depends(get_broadcaster)],
+) -> TranslateResult:
+    """English for this incident's reports that have none yet (newest first, one batch).
+
+    Called when a dispatcher opens the incident; each report is translated at most once.
+    """
+    if await db.incident(incident_id) is None:
+        raise HTTPException(404, "incident not found")
+    translator: Translator | None = request.app.state.translator
+    inflight: set[str] = request.app.state.translating
+    todo = [
+        r
+        for r, _ in await db.incident_reports(incident_id)
+        if r.english_gloss is None and r.raw_text.strip() and r.id not in inflight
+    ][-MAX_BATCH:]
+    if not todo or translator is None or not translator.available:
+        return TranslateResult(translated=0, pending=len(todo), available=translator is not None and translator.available)
+    inflight.update(r.id for r in todo)
+    try:
+        results = await translator.translate([r.raw_text for r in todo])
+    finally:
+        inflight.difference_update(r.id for r in todo)
+    done = [(report, english) for report, english in zip(todo, results, strict=True) if english is not None]
+    async with db.transaction():
+        await db.save_glosses([(report.id, english) for report, english in done])
+    for report, english in done:
+        broadcaster.publish("report.updated", report.model_copy(update={"english_gloss": english}).model_dump(mode="json"))
+    return TranslateResult(translated=len(done), pending=len(todo) - len(done), available=True)
 
 
 @alerts_router.get("/alerts")

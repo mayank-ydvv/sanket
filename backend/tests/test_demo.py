@@ -23,7 +23,7 @@ from tests.conftest import receive_event
 from tests.test_incidents import make_index
 from tests.test_live import RecordingHub
 from tests.test_llm import FakeProvider, make_decider, valid_json
-from tests.test_reasoning import GAUR_CITY, Clock, ScriptedProvider, located, make_reasoner
+from tests.test_reasoning import ANNA_NAGAR, Clock, ScriptedProvider, located, make_reasoner
 
 FIRE = Decision(
     is_emergency=True, emergency_prob=0.95, department="fire", department_conf=0.9, severity=4, alert_now=True
@@ -31,7 +31,7 @@ FIRE = Decision(
 RISK = ReasoningOutput(
     linked_hazards=["smoke", "gas smell"],
     combined_risk="Smoke plus gas smell: possible explosion risk",
-    briefing=["Location/access: Gaur City 2", "Hazards: smoke, gas smell", "People at risk: not stated"],
+    briefing=["Location/access: Anna Nagar 2nd Avenue", "Hazards: smoke, gas smell", "People at risk: not stated"],
 )
 
 
@@ -43,14 +43,14 @@ def test_recording_round_trips_and_skips_bad_lines(tmp_path: Path) -> None:
     path = tmp_path / "run.jsonl"
     recorder = DemoRecorder(path)
     recorder.decision("aag   lagi\nhai", LLMOutcome(FIRE, "groq", "qwen"), reply(), share=4)
-    recorder.reasoning("Fire · Gaur City 2", RISK.model_copy(update={"merge_suggestions": ["i_old"]}), reply(2.5))
+    recorder.reasoning("Fire · Anna Nagar 2nd Avenue", RISK.model_copy(update={"merge_suggestions": ["i_old"]}), reply(2.5))
     recorder.close()
     with path.open("a") as f:
         f.write("not json\n" + json.dumps({"kind": "decision", "text": "missing fields"}) + "\n")
     cache = DemoCache.load(path)
     recorded = cache.decisions[text_key("aag lagi hai")]
     assert recorded.decision == FIRE and (recorded.input_tokens, recorded.output_tokens) == (250, 100)
-    reasoning = cache.reasoning["Fire · Gaur City 2"]
+    reasoning = cache.reasoning["Fire · Anna Nagar 2nd Avenue"]
     assert reasoning.output.merge_suggestions == []  # incident ids never carry over to another run
     assert reasoning.output.combined_risk == RISK.combined_risk and reasoning.latency_s == 2.5
 
@@ -102,7 +102,7 @@ async def db(tmp_path: Path) -> Database:
 async def test_reasoning_is_recorded_then_replayed_without_a_provider(db: Database, tmp_path: Path) -> None:
     path = tmp_path / "run.jsonl"
     service = IncidentService(db, make_index())
-    incident = await located(db, service, "smoke on the 5th floor of tower B", GAUR_CITY, seed=1, n=3)
+    incident = await located(db, service, "smoke on the 5th floor of tower B", ANNA_NAGAR, seed=1, n=3)
     answer = RISK.model_dump()
     live = make_reasoner(service, db, ScriptedProvider(lambda _user: json.dumps(answer)), Clock())
     recorder = DemoRecorder(path)
@@ -130,7 +130,7 @@ async def test_reasoning_is_recorded_then_replayed_without_a_provider(db: Databa
     assert await replayer.reason(incident.id) is None  # answered once: re-runs don't re-charge the ticker
     assert stats.calls["fake/reasoner"] == 1
 
-    other = await located(db, service, "gas smell near the lift", GAUR_CITY, seed=2, n=3)
+    other = await located(db, service, "gas smell near the lift", ANNA_NAGAR, seed=2, n=3)
     if other.title != incident.title:
         assert await replayer.reason(other.id) is None  # nothing recorded: no answer, no error
 
@@ -140,7 +140,7 @@ def no_network(request: httpx.Request) -> httpx.Response:
 
 
 def test_demo_cache_app_replays_with_no_network(settings: Settings, tmp_path: Path) -> None:
-    text = "Sector 18 metro pe kuch ho gaya, jaldi aao"
+    text = "Marina beach pe kuch ho gaya, jaldi aao"
     path = tmp_path / "run.jsonl"
     recorder = DemoRecorder(path)
     recorder.decision(text, LLMOutcome(FIRE, "groq", "qwen"), reply(0.3), share=1)  # local answer shows first

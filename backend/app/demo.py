@@ -1,7 +1,8 @@
 """Demo safety net: record the LLM layer during a live run, replay it offline later.
 
-DEMO_RECORD=true appends one JSON line per fast-LLM decision (keyed by the
-report's text) and per System 2 reasoning result (keyed by the incident title),
+DEMO_RECORD=true appends one JSON line per fast-LLM decision and per on-demand
+translation (keyed by the report's text) and per System 2 reasoning result
+(keyed by the incident title),
 with the latency and tokens the provider reported. DEMO_CACHE=true serves those
 answers from the file, after the same delay, instead of calling any provider.
 
@@ -52,8 +53,23 @@ class DemoRecorder:
                 "kind": "decision",
                 "text": text_key(text),
                 "decision": outcome.decision.model_dump(),
+                "english": outcome.english,
                 "provider": outcome.provider,
                 "model": outcome.model,
+                "latency_s": round(reply.latency_s, 3),
+                "input_tokens": reply.input_tokens // share,
+                "output_tokens": reply.output_tokens // share,
+            }
+        )
+
+    def translation(self, text: str, english: str, reply: ProviderReply, share: int) -> None:
+        self._write(
+            {
+                "kind": "translation",
+                "text": text_key(text),
+                "english": english,
+                "provider": reply.provider,
+                "model": reply.model,
                 "latency_s": round(reply.latency_s, 3),
                 "input_tokens": reply.input_tokens // share,
                 "output_tokens": reply.output_tokens // share,
@@ -87,6 +103,17 @@ class RecordedDecision:
     input_tokens: int
     output_tokens: int
     call_id: int  # records answered by the same provider reply share one id
+    english: str | None = None
+
+
+@dataclass(frozen=True)
+class RecordedTranslation:
+    english: str
+    provider: str
+    model: str
+    latency_s: float
+    input_tokens: int
+    output_tokens: int
 
 
 @dataclass(frozen=True)
@@ -110,6 +137,7 @@ class RecordedReasoning:
 class DemoCache:
     decisions: dict[str, RecordedDecision] = field(default_factory=dict)
     reasoning: dict[str, RecordedReasoning] = field(default_factory=dict)
+    translations: dict[str, RecordedTranslation] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> "DemoCache":
@@ -140,6 +168,16 @@ class DemoCache:
                         int(record["input_tokens"]),
                         int(record["output_tokens"]),
                         call_id,
+                        record.get("english"),
+                    )
+                elif record["kind"] == "translation":
+                    cache.translations[record["text"]] = RecordedTranslation(
+                        str(record["english"]),
+                        record["provider"],
+                        record["model"],
+                        float(record["latency_s"]),
+                        int(record["input_tokens"]),
+                        int(record["output_tokens"]),
                     )
                 elif record["kind"] == "reasoning":
                     cache.reasoning[record["title"]] = RecordedReasoning(
@@ -152,7 +190,12 @@ class DemoCache:
                     )
             except (KeyError, ValueError, TypeError) as exc:
                 log.warning("skipping bad demo record on line %d: %r", line_no, exc)
-        log.info("demo cache: %d decisions, %d reasoning results", len(cache.decisions), len(cache.reasoning))
+        log.info(
+            "demo cache: %d decisions, %d translations, %d reasoning results",
+            len(cache.decisions),
+            len(cache.translations),
+            len(cache.reasoning),
+        )
         return cache
 
 
@@ -189,7 +232,7 @@ class ReplayDecider:
                 continue
             self.hits += 1
             self._charge(text_key(text), record)
-            outcomes.append(LLMOutcome(record.decision, record.provider, record.model))
+            outcomes.append(LLMOutcome(record.decision, record.provider, record.model, record.english))
         self.stats.batches += 1
         self.stats.items += len(texts)
         return outcomes

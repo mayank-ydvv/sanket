@@ -32,6 +32,7 @@ from app.decision.rules import PrankTracker, SafetyRules
 from app.intake import reports, twilio
 from app.intake.service import Intake
 from app.stt.transcribe import GroqWhisper, SarvamSTT, SpeechToText, STTChain
+from app.translate import Translator
 from app.triage import Triage
 from app.worker import PipelineWorker
 
@@ -206,6 +207,8 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
         )
         app.state.cost = cost
         tasks.append(asyncio.create_task(cost.run(), name="cost-meter"))
+        app.state.translator = Translator(llm.chain, recorder, replay) if llm is not None else None
+        app.state.translating = set()
         app.state.stt = build_stt(cfg, http)
         app.state.voice_tasks = set()
         try:
