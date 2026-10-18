@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.alerts.service import AlertService
@@ -24,6 +24,15 @@ class SplitRequest(BaseModel):
 class SplitResult(BaseModel):
     original: Incident
     new: Incident
+
+
+class MergeRequest(BaseModel):
+    into: str
+
+
+class MergeResult(BaseModel):
+    merged: Incident
+    kept: Incident
 
 
 @router.get("")
@@ -66,6 +75,7 @@ async def override(
     incident_id: str,
     body: OverrideRequest,
     incidents: Annotated[IncidentService, Depends(get_incidents)],
+    alerts: Annotated[AlertService, Depends(get_alerts)],
     broadcaster: Annotated[Broadcaster, Depends(get_broadcaster)],
 ) -> Incident:
     try:
@@ -73,6 +83,7 @@ async def override(
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
     broadcaster.publish("incident.updated", incident.model_dump(mode="json"))
+    await alerts.reroute_if_department_changed(incident)
     return incident
 
 
@@ -83,6 +94,28 @@ async def acknowledge(incident_id: str, alerts: Annotated[AlertService, Depends(
         return await alerts.acknowledge(incident_id, actor=DISPATCHER)
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/{incident_id}/merge")
+async def merge_incident(
+    incident_id: str,
+    body: MergeRequest,
+    request: Request,
+    incidents: Annotated[IncidentService, Depends(get_incidents)],
+    broadcaster: Annotated[Broadcaster, Depends(get_broadcaster)],
+) -> MergeResult:
+    """Dispatcher confirms a merge (e.g. one the reasoning layer suggested)."""
+    try:
+        merged, kept = await incidents.merge_into(incident_id, body.into, actor=DISPATCHER)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    broadcaster.publish("incident.updated", merged.model_dump(mode="json"))
+    broadcaster.publish("incident.updated", kept.model_dump(mode="json"))
+    if request.app.state.reasoner is not None:
+        request.app.state.reasoner.consider([kept])
+    return MergeResult(merged=merged, kept=kept)
 
 
 @router.post("/{incident_id}/split")

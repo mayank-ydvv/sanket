@@ -20,7 +20,9 @@ from app.cluster.index import IncidentIndex
 from app.cluster.service import IncidentService
 from app.config import Settings, get_settings
 from app.db import Database
-from app.decision.factory import build_llm_decider
+from app.decision.factory import build_llm_decider, build_reasoning_chain
+from app.decision.providers import RateLimiter
+from app.reasoning.scheduler import Reasoner, ReasonerConfig
 from app.decision.local import LocalClassifier
 from app.decision.pipeline import DecisionPipeline
 from app.decision.rules import PrankTracker, SafetyRules
@@ -86,7 +88,8 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
         http = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0), transport=transport)
         hub = ws.Hub()
         broadcaster = ws.Broadcaster(hub)
-        llm = build_llm_decider(cfg, http)
+        limiters: dict[str, RateLimiter] = {}  # one quota per provider/model, shared by both systems
+        llm = build_llm_decider(cfg, http, limiters)
         if llm is None:
             log.warning("no LLM provider configured; uncertain reports keep their local decision")
         else:
@@ -119,7 +122,27 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
             db, incidents, broadcaster, build_sender(cfg, http), cfg.alert_contacts, cfg.alert_ack_timeout_s
         )
         log.info("resumed %d alert escalation timers", await alerts.restore())
-        triage = Triage(pipeline, geocoder, await load_embedder(cfg), incidents, alerts, broadcaster)
+        reasoning_chain = build_reasoning_chain(cfg, http, limiters) if cfg.reasoning_enabled else None
+        reasoner = (
+            Reasoner(
+                incidents,
+                db,
+                reasoning_chain,
+                broadcaster,
+                ReasonerConfig(
+                    debounce_s=cfg.reasoning_debounce_s,
+                    min_reports=cfg.reasoning_min_reports,
+                    min_severity=cfg.reasoning_min_severity,
+                    neighbor_m=cfg.reasoning_neighbor_m,
+                    neighbor_window_s=cfg.reasoning_neighbor_window_s,
+                    max_reports=cfg.reasoning_max_reports,
+                    concurrency=cfg.reasoning_concurrency,
+                ),
+            )
+            if reasoning_chain is not None
+            else None
+        )
+        triage = Triage(pipeline, geocoder, await load_embedder(cfg), incidents, alerts, broadcaster, reasoner)
         worker = PipelineWorker(
             triage.place,
             triage.commit,
@@ -133,10 +156,13 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
             asyncio.create_task(broadcaster.run(), name="broadcaster"),
             asyncio.create_task(alerts.run(), name="alert-escalation"),
         ]
+        if reasoner is not None:
+            tasks.append(asyncio.create_task(reasoner.run(), name="reasoning"))
         if llm is not None:
             tasks.append(asyncio.create_task(llm.run(), name="llm-batcher"))
         app.state.settings = cfg
         app.state.llm = llm
+        app.state.reasoner = reasoner
         app.state.db = db
         app.state.http = http
         app.state.hub = hub
@@ -150,7 +176,7 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
         app.state.intake = intake
         app.state.simulation = SimulationRunner(intake, broadcaster, lambda: worker.processed)
         cost = CostMeter(
-            llm.stats if llm is not None else None,
+            [c.stats for c in (llm.chain if llm else None, reasoning_chain) if c is not None],
             cfg.llm_prices,
             cfg.counterfactual_price,
             (cfg.counterfactual_input_tokens, cfg.counterfactual_output_tokens),
@@ -196,6 +222,11 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
             "llm": llm.stats.as_dict() if llm is not None else None,
             "llm_chain": [s.provider.name for s in llm.chain.slots] if llm is not None else [],
             "geocoder_network_calls": app.state.geocoder.network_calls,
+            "reasoning": (
+                {**app.state.reasoner.stats.__dict__, "chain": [s.provider.name + "/" + s.provider.model for s in app.state.reasoner.chain.slots]}
+                if app.state.reasoner is not None
+                else None
+            ),
             "cost": app.state.cost.snapshot().model_dump(),
         }
 

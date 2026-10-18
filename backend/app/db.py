@@ -89,7 +89,10 @@ ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("alerts", "level", "INTEGER"),
 )
 _SUMMARY_FIELDS = frozenset(
-    {"lane", "confidence", "silent_sos", "prank_suspected", "needs_review", "overrides"}
+    {
+        "lane", "confidence", "silent_sos", "prank_suspected", "needs_review", "overrides",
+        "combined_risk", "risk_hazards", "merge_suggestions", "reasoned_at",
+    }
 )
 
 _REPORT_COLUMNS = (

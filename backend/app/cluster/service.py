@@ -79,6 +79,10 @@ class IncidentMeta:
     status: IncidentStatus = "open"
     briefing: list[str] | None = None
     overrides: dict[str, str | int] = field(default_factory=dict)
+    combined_risk: str | None = None
+    risk_hazards: list[str] = field(default_factory=list)
+    merge_suggestions: list[str] = field(default_factory=list)
+    reasoned_at: float | None = None
     lanes: Counter[str] = field(default_factory=Counter)
     confidence_sum: float = 0.0
     decided: int = 0
@@ -146,6 +150,18 @@ class IncidentMeta:
         return "review" if self.review * 2 >= self.decided else "confirm"
 
 
+# State set by dispatchers or the reasoning layer, not derivable from the reports.
+CARRIED = ("status", "briefing", "overrides", "combined_risk", "risk_hazards", "merge_suggestions", "reasoned_at")
+
+
+def inherit(meta: IncidentMeta, source: "IncidentMeta | Incident") -> IncidentMeta:
+    """Copy carried state onto metadata rebuilt from reports. O(1)."""
+    for name in CARRIED:
+        value = getattr(source, name)
+        setattr(meta, name, value.copy() if isinstance(value, dict | list) else value)
+    return meta
+
+
 def _new_incident_id() -> str:
     return f"i_{uuid.uuid4().hex}"
 
@@ -190,6 +206,10 @@ class IncidentService:
             last_updated=inc.last_updated if inc else (base.last_updated if base else self._clock()),
             linked_hazards=list(meta.hazards),
             briefing=meta.briefing,
+            combined_risk=meta.combined_risk,
+            risk_hazards=meta.risk_hazards,
+            merge_suggestions=meta.merge_suggestions,
+            reasoned_at=meta.reasoned_at,
             lane=meta.lane,
             confidence=meta.confidence_sum / meta.decided if meta.decided else 0.0,
             silent_sos=meta.silent_sos > 0,
@@ -208,7 +228,7 @@ class IncidentService:
             raise LookupError("incident not found")
         if incident_id not in self._meta:
             meta = self._rebuild([r for r, _ in await self._db.incident_reports(incident_id)])
-            meta.status, meta.briefing, meta.overrides = stored.status, stored.briefing, dict(stored.overrides)
+            inherit(meta, stored)
             self._meta[incident_id] = meta
         return self._meta[incident_id], stored
 
@@ -233,7 +253,7 @@ class IncidentService:
             if centroid is None:
                 continue
             meta = self._rebuild([r for r, _ in await self._db.incident_reports(incident.id)])
-            meta.status, meta.briefing, meta.overrides = incident.status, incident.briefing, dict(incident.overrides)
+            inherit(meta, incident)
             self._meta[incident.id] = meta
             self._index.add(
                 incident.id, _vector(centroid), incident.department, incident.lat, incident.lng,
@@ -425,7 +445,7 @@ class IncidentService:
                     continue
                 meta = self._rebuild(rows)
                 if old is not None:
-                    meta.status, meta.briefing, meta.overrides = old.status, old.briefing, old.overrides
+                    inherit(meta, old)
                 self._meta[incident_id] = meta
                 changes.updated.append(self._compose(incident_id, meta, await self._db.incident(incident_id)))
                 changes.reports += [r for r in rows if r.id in revised_ids]
@@ -472,7 +492,7 @@ class IncidentService:
             old_meta = self._meta.get(incident_id)
             meta = self._rebuild(remaining)
             if old_meta is not None:
-                meta.status, meta.briefing, meta.overrides = old_meta.status, old_meta.briefing, old_meta.overrides
+                inherit(meta, old_meta)
             self._meta[incident_id] = meta
             located = [r for r in remaining if r.lat is not None and r.lng is not None]
             self._index.relocate(
@@ -517,6 +537,82 @@ class IncidentService:
                 ]
             )
         return after
+
+    def nearby(self, incident_id: str, radius_km: float, window_s: float) -> list[Incident]:
+        """Open incidents within ``radius_km`` updated in the last ``window_s``. O(k)."""
+        since = self._clock() - window_s
+        return [
+            self.snapshot(i)
+            for i in self._index.nearby(incident_id, radius_km, since)
+            if i in self._meta
+        ]
+
+    async def reasoning_input(self, incident_id: str, max_reports: int) -> tuple[Incident, list[Report]]:
+        """Current incident and its newest ``max_reports`` reports (oldest first)."""
+        incident = await self.current(incident_id)
+        reports = [r for r, _ in await self._db.incident_reports(incident_id)]
+        return incident, reports[-max_reports:]
+
+    async def apply_reasoning(
+        self,
+        incident_id: str,
+        *,
+        risk_hazards: list[str],
+        combined_risk: str | None,
+        merge_suggestions: list[str],
+        briefing: list[str],
+        actor: str,
+        prompt_version: str,
+    ) -> Incident:
+        """Store the reasoning layer's output on an incident (audited with prompt version)."""
+        async with self._lock, self._db.transaction():
+            meta, stored = await self._meta_for(incident_id)
+            meta.risk_hazards, meta.combined_risk = risk_hazards, combined_risk
+            meta.merge_suggestions, meta.briefing = merge_suggestions, briefing or None
+            meta.reasoned_at = self._clock()
+            incident = self._compose(incident_id, meta, stored)
+            await self._db.upsert_incidents([self._centroid_row(incident)])
+            await self._db.audit(
+                [
+                    (
+                        "incident", incident_id, "reasoned", actor, None,
+                        json.dumps({
+                            "prompt_version": prompt_version, "risk_hazards": risk_hazards,
+                            "combined_risk": combined_risk, "merge_suggestions": merge_suggestions,
+                            "briefing": briefing,
+                        }, ensure_ascii=False),
+                    )
+                ]
+            )
+        return incident
+
+    async def merge_into(self, gone: str, keep: str, actor: str) -> tuple[Incident, Incident]:
+        """Dispatcher-confirmed merge of ``gone`` into ``keep``. O(r) to rebuild ``keep``."""
+        if gone == keep:
+            raise ValueError("an incident cannot be merged into itself")
+        async with self._lock, self._db.transaction():
+            gone_meta, gone_row = await self._meta_for(gone)
+            keep_meta, _ = await self._meta_for(keep)
+            if "merged" in (gone_meta.status, keep_meta.status):
+                raise ValueError("incident already merged")
+            if gone in self._index and keep in self._index:
+                self._index.merge(keep, gone)
+            else:
+                self._index.drop(gone)
+            await self._db.move_reports(gone, keep)
+            rebuilt = inherit(self._rebuild([r for r, _ in await self._db.incident_reports(keep)]), keep_meta)
+            rebuilt.merge_suggestions = [i for i in rebuilt.merge_suggestions if i != gone]
+            if gone_meta.status == "dispatched":
+                rebuilt.status = "dispatched"
+            self._meta[keep] = rebuilt
+            kept = self._compose(keep, rebuilt, await self._db.incident(keep))
+            merged = self._compose(gone, gone_meta, gone_row).model_copy(
+                update={"status": "merged", "report_count": 0, "lat": None, "lng": None, "briefing": [f"Merged into {keep}"]}
+            )
+            del self._meta[gone]
+            await self._db.upsert_incidents([self._centroid_row(kept), (merged, None)])
+            await self._db.audit([("incident", gone, "merged", actor, None, json.dumps({"into": keep}))])
+        return merged, kept
 
     async def set_status(self, incident_id: str, status: IncidentStatus, actor: str, action: str) -> Incident:
         async with self._lock, self._db.transaction():

@@ -126,6 +126,11 @@ class Incident(BaseModel):
     prank_suspected: bool = False
     needs_review: bool = False
     overrides: dict[str, str | int] = Field(default_factory=dict)
+    # System 2 (reasoning layer): combined risk across reports, merge hints, when it ran.
+    combined_risk: str | None = None
+    risk_hazards: list[str] = Field(default_factory=list)
+    merge_suggestions: list[str] = Field(default_factory=list)
+    reasoned_at: float | None = None
 
 
 class Price(BaseModel):

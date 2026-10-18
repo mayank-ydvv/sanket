@@ -28,6 +28,19 @@ class Settings(BaseSettings):
     # Confidence gates (see README: auto-dispatch / one-click confirm / human review).
     conf_threshold: float = Field(0.8, ge=0.0, le=1.0)
 
+    # System 2 reasoning layer (cross-report linking, merge hints, briefings).
+    reasoning_enabled: bool = True
+    reasoning_chain: list[str] = ["gemini", "openrouter", "groq"]
+    reasoning_gemini_model: str = "gemini-3.5-flash"
+    reasoning_debounce_s: float = Field(20.0, ge=0)
+    reasoning_min_reports: int = Field(3, ge=1)
+    reasoning_min_severity: int = Field(3, ge=1, le=5)
+    reasoning_neighbor_m: float = Field(300.0, gt=0)
+    reasoning_neighbor_window_s: float = Field(900.0, gt=0)
+    reasoning_max_reports: int = Field(30, ge=1)
+    reasoning_concurrency: int = Field(2, ge=1)
+    reasoning_max_queue_wait_s: float = Field(5.0, ge=0)
+
     # Geocoding (demo district: Noida). Viewbox is west, south, east, north.
     geo_district: str = "Noida, Uttar Pradesh"
     geo_center: tuple[float, float] = (28.5355, 77.3910)

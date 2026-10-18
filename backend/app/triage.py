@@ -19,6 +19,7 @@ from app.cluster.location import extract_location
 from app.cluster.service import ChangeSet, IncidentService, Placed, Revision
 from app.decision.pipeline import DecisionPipeline
 from app.models import DecisionResult, Report
+from app.reasoning.scheduler import Reasoner
 from app.ws import Broadcaster
 
 log = logging.getLogger(__name__)
@@ -33,8 +34,10 @@ class Triage:
         incidents: IncidentService,
         alerts: AlertService,
         broadcaster: Broadcaster,
+        reasoner: Reasoner | None = None,
     ) -> None:
         self._pipeline = pipeline
+        self._reasoner = reasoner
         self._geocoder = geocoder
         self._embedder = embedder
         self._incidents = incidents
@@ -118,6 +121,8 @@ class Triage:
                 log.exception("applying %d revisions failed", len(revisions))
 
     def _publish(self, changes: ChangeSet, report_event: str) -> None:
+        if self._reasoner is not None:
+            self._reasoner.consider([*changes.created, *changes.updated])
         for incident in changes.created:
             self._broadcaster.publish("incident.created", incident.model_dump(mode="json"))
         for incident in changes.updated:
@@ -130,3 +135,5 @@ class Triage:
         for incident in [*changes.created, *changes.updated]:
             if incident.lane == "auto" and incident.status == "open":
                 await self._alerts.dispatch(incident.id, triggered_by="auto")
+            elif incident.status == "dispatched":
+                await self._alerts.reroute_if_department_changed(incident)

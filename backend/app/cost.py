@@ -9,7 +9,8 @@ price so the comparison means something at production scale.
 
 import asyncio
 import time
-from collections.abc import Callable
+from collections import Counter
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from pydantic import BaseModel
@@ -38,7 +39,7 @@ class CostSnapshot(BaseModel):
 class CostMeter:
     def __init__(
         self,
-        stats: LLMStats | None,
+        stats: Sequence[LLMStats],
         prices: dict[str, Price],
         counterfactual_price: Price,
         counterfactual_tokens: tuple[int, int],
@@ -62,9 +63,13 @@ class CostMeter:
 
     def snapshot(self) -> CostSnapshot:
         """O(m) over the models used."""
-        stats = self._stats
-        inputs = dict(stats.input_tokens) if stats else {}
-        outputs = dict(stats.output_tokens) if stats else {}
+        inputs: Counter[str] = Counter()
+        outputs: Counter[str] = Counter()
+        calls = 0
+        for stats in self._stats:  # System 1 fast path and System 2 reasoning
+            inputs.update(stats.input_tokens)
+            outputs.update(stats.output_tokens)
+            calls += sum(stats.calls.values())
         usd = sum(
             inputs.get(key, 0) * self._price_for(key).input + outputs.get(key, 0) * self._price_for(key).output
             for key in set(inputs) | set(outputs)
@@ -76,7 +81,7 @@ class CostMeter:
         per_1000 = 1000 / reports if reports else 0.0
         return CostSnapshot(
             reports=reports,
-            llm_calls=sum(stats.calls.values()) if stats else 0,
+            llm_calls=calls,
             input_tokens=sum(inputs.values()),
             output_tokens=sum(outputs.values()),
             sanket_inr=round(sanket, 4),

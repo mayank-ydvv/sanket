@@ -162,7 +162,7 @@ def test_local_decision_first_then_llm_revision_and_auto_dispatch(
         return await answer(system, user, max_output_tokens)
 
     provider.complete = slow_complete  # type: ignore[method-assign]
-    monkeypatch.setattr(main_module, "build_llm_decider", lambda cfg, http: make_decider(provider))
+    monkeypatch.setattr(main_module, "build_llm_decider", lambda cfg, http, limiters: make_decider(provider))
     with TestClient(create_app(settings)) as client, client.websocket_connect("/ws") as ws:
         report_id = client.post("/reports", json={"text": "Sector 18 metro pe kuch ho gaya, jaldi aao"}).json()["id"]
         first = receive_event(ws, "report.created")["data"]
@@ -242,3 +242,43 @@ async def test_lane_needs_majority_flags_for_review_but_any_silent_sos(db: Datab
     assert meta.lane == "auto"
     meta.add(Report(id="s", channel="sms", caller_hash=None, raw_text="1111", received_at=0, decision=Decision(**confident, silent_sos=True)), False)
     assert meta.lane == "review"
+
+
+async def test_escalation_follows_the_alerts_own_ladder_after_department_change(db: Database) -> None:
+    from app.models import OverrideRequest
+
+    clock = Clock()
+    incidents = IncidentService(db, make_index(), clock=clock)
+    changes = await incidents.assign(await placed(db, HashingEmbedder(), ["fire at Sector 18 metro"]))
+    incident_id = changes.created[0].id
+    ladders = {"fire": [Contact(name="Station"), Contact(name="Supervisor")], "none": [Contact(name="Control room")]}
+    alerts = AlertService(db, incidents, Broadcaster(RecordingHub()), MockSender(), ladders, 90, clock=clock)  # type: ignore[arg-type]
+    await alerts.dispatch(incident_id, "auto")
+    await incidents.override(incident_id, OverrideRequest(department="none"), actor="dispatcher")  # 1-rung ladder now
+    clock.now += 91
+    (second,) = await alerts.tick()
+    assert second.contact == "Supervisor" and second.department == "fire"
+
+
+async def test_department_change_after_dispatch_alerts_the_new_department(db: Database) -> None:
+    from app.models import OverrideRequest
+
+    clock = Clock()
+    incidents = IncidentService(db, make_index(), clock=clock)
+    changes = await incidents.assign(await placed(db, HashingEmbedder(), ["fire at Sector 18 metro"], department="disaster"))
+    incident_id = changes.created[0].id
+    sender = MockSender()
+    ladders = {"disaster": [Contact(name="SDRF"), Contact(name="DM")], "fire": [Contact(name="Fire station"), Contact(name="CFO")]}
+    alerts = AlertService(db, incidents, Broadcaster(RecordingHub()), sender, ladders, 90, clock=clock)  # type: ignore[arg-type]
+    await alerts.dispatch(incident_id, "auto")
+    unchanged = await incidents.current(incident_id)
+    assert await alerts.reroute_if_department_changed(unchanged) is None
+    corrected = await incidents.override(incident_id, OverrideRequest(department="fire"), actor="dispatcher")
+    rerouted = await alerts.reroute_if_department_changed(corrected)
+    assert rerouted is not None and rerouted.contact == "Fire station" and rerouted.triggered_by == "department_changed"
+    first = (await db.alerts_for(incident_id))[0]
+    assert first.contact == "SDRF" and first.escalated_to == "rerouted:fire"
+    clock.now += 91
+    (escalated,) = await alerts.tick()  # only the new department's alert keeps escalating
+    assert escalated.contact == "CFO"
+    assert [c.name for c, _ in sender.sent] == ["SDRF", "Fire station", "CFO"]

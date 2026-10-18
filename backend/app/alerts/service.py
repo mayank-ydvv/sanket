@@ -60,6 +60,7 @@ class AlertService:
         self._heap: list[tuple[float, str]] = []
         self._live: dict[str, _Live] = {}
         self._by_incident: dict[str, str] = {}
+        self._alerted_department: dict[str, str] = {}
         self._wake = asyncio.Event()
 
     def _ladder(self, department: str) -> list[Contact]:
@@ -73,6 +74,7 @@ class AlertService:
         return len(self._live)
 
     def _track(self, alert: Alert, message: str) -> None:
+        self._alerted_department[alert.incident_id] = alert.department
         self._live[alert.id] = _Live(alert, message)
         self._by_incident[alert.incident_id] = alert.id
         heapq.heappush(self._heap, (alert.sent_at + self._timeout, alert.id))
@@ -88,8 +90,14 @@ class AlertService:
         self._broadcaster.publish("incident.updated", updated.model_dump(mode="json"))
         return alert
 
-    async def _send(self, incident: Incident, level: int, triggered_by: str) -> Alert:
-        contact = self._ladder(incident.department)[level]
+    async def _send(self, incident: Incident, level: int, triggered_by: str, department: str | None = None) -> Alert:
+        """Alert rung ``level`` of ``department``'s ladder (default: the incident's department).
+
+        Escalations pass the original alert's department, so a later department change
+        (LLM revision, dispatcher override) cannot point past the end of a shorter ladder.
+        """
+        department = department or incident.department
+        contact = self._ladder(department)[level]
         message = alert_message(incident)
         channel = self._sender.channel
         try:
@@ -100,7 +108,7 @@ class AlertService:
         alert = Alert(
             id=f"a_{uuid.uuid4().hex}",
             incident_id=incident.id,
-            department=incident.department,
+            department=department,  # type: ignore[arg-type]
             channel=channel,
             contact=contact.name,
             level=level,
@@ -115,6 +123,23 @@ class AlertService:
         self._track(alert, message)
         self._broadcaster.publish("alert.sent", alert.model_dump(mode="json"))
         return alert
+
+    async def reroute_if_department_changed(self, incident: Incident) -> Alert | None:
+        """A dispatched incident whose department changed (LLM revision, override) alerts
+        the newly responsible department too; a still-waiting alert to the old one stops
+        escalating. O(log a)."""
+        alerted = self._alerted_department.get(incident.id)
+        if incident.status != "dispatched" or alerted is None or alerted == incident.department:
+            return None
+        alert_id = self._by_incident.pop(incident.id, None)
+        if alert_id is not None:
+            old = self._live.pop(alert_id).alert
+            target = f"rerouted:{incident.department}"
+            async with self._db.transaction():
+                await self._db.update_alert(old.id, None, target)
+                await self._db.audit([("alert", old.id, "rerouted", "department-change", alerted, incident.department)])
+            self._broadcaster.publish("alert.updated", old.model_copy(update={"escalated_to": target}).model_dump(mode="json"))
+        return await self._send(incident, level=0, triggered_by="department_changed")
 
     async def acknowledge(self, incident_id: str, actor: str) -> Alert:
         alert_id = self._by_incident.pop(incident_id, None)
@@ -137,23 +162,32 @@ class AlertService:
             live = self._live.pop(alert_id, None)
             if live is None:
                 continue  # acknowledged or already escalated
-            alert = live.alert
-            del self._by_incident[alert.incident_id]
-            ladder = self._ladder(alert.department)
-            next_level = alert.level + 1
-            target = ladder[next_level].name if next_level < len(ladder) else "exhausted"
-            async with self._db.transaction():
-                await self._db.update_alert(alert.id, None, target)
-                await self._db.audit(
-                    [("alert", alert.id, "escalated", "escalation-timer", None, json.dumps({"to": target}))]
-                )
-            self._broadcaster.publish("alert.updated", alert.model_copy(update={"escalated_to": target}).model_dump(mode="json"))
-            if next_level < len(ladder):
-                incident = await self._incidents.current(alert.incident_id)
-                escalated.append(await self._send(incident, next_level, "escalation"))
-            else:
-                log.error("escalation ladder exhausted for incident %s", alert.incident_id)
+            try:
+                sent = await self._escalate(live.alert)
+            except Exception:
+                # One bad alert must not stop the others from escalating.
+                log.exception("escalating alert %s failed", alert_id)
+                continue
+            if sent is not None:
+                escalated.append(sent)
         return escalated
+
+    async def _escalate(self, alert: Alert) -> Alert | None:
+        self._by_incident.pop(alert.incident_id, None)
+        ladder = self._ladder(alert.department)
+        next_level = alert.level + 1
+        target = ladder[next_level].name if next_level < len(ladder) else "exhausted"
+        async with self._db.transaction():
+            await self._db.update_alert(alert.id, None, target)
+            await self._db.audit(
+                [("alert", alert.id, "escalated", "escalation-timer", None, json.dumps({"to": target}))]
+            )
+        self._broadcaster.publish("alert.updated", alert.model_copy(update={"escalated_to": target}).model_dump(mode="json"))
+        if next_level >= len(ladder):
+            log.error("escalation ladder exhausted for incident %s", alert.incident_id)
+            return None
+        incident = await self._incidents.current(alert.incident_id)
+        return await self._send(incident, next_level, "escalation", department=alert.department)
 
     async def run(self) -> None:
         """Sleep until the earliest deadline (or a new alert), then escalate what is due."""

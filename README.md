@@ -182,3 +182,31 @@ Measured live (free tiers, 2026-10-17), 500 reports in 10 s:
 The simulator reuses the corpus phrasings, including those the local model trained on, so
 disaster mode shows system behaviour, not accuracy. Accuracy comes from the held-out test
 set (`scripts/benchmark.py`, Phase 9).
+
+## System 2: reasoning layer
+
+A slower reasoning model looks only at complex incidents: those with ≥ 3 reports, two or more
+distinct hazards, or another open incident within 300 m in the last 15 minutes (severity ≥ 3,
+never silent SOS). It runs in the background (`app/reasoning/`), at most once per 20 s per
+incident and only when the incident's reports or hazards changed, so dispatch never waits on it.
+
+- **Input**: the incident's newest 30 reports plus nearby incidents (distance, hazards, two
+  sample reports each), prompt `reasoning_v1`.
+- **Output** (validated and grounded): linked hazards; a `combined_risk` only when hazards
+  from different reports add up to more (e.g. "Fire on the 3rd floor combined with a strong
+  gas smell: high risk of gas explosion or toxic smoke inhalation"); `merge_suggestions`, kept
+  only if they name a nearby incident the model was actually shown; and a 3-line crew
+  briefing (location/access, hazards, people at risk, "not stated" when unknown). Stored on
+  the incident and audited with the model and prompt version.
+- **Dispatcher**: the detail panel shows the linked-risk banner, the briefing and "Merge
+  here" buttons (`POST /incidents/{id}/merge`). Merges are suggestions, never automatic.
+- **Quotas**: both systems share one rate limiter per provider/model; System 1 runs first.
+  A daily-quota 429 parks that provider for 15 min; an incident that cannot be reasoned
+  backs off exponentially (20 s → 5 min); due incidents are taken most severe first.
+- **Rerouting**: if a dispatched incident's department changes (LLM revision or override),
+  the new department is alerted and the old alert stops escalating.
+
+Live observation: right after a 500-report surge the free tiers were exhausted (Gemini's
+daily quota, OpenRouter's upstream limit), so System 2 caught up over the following hours
+mostly via Groq. With paid or self-hosted capacity it would keep pace; on free tiers,
+briefings arrive late in a big surge.

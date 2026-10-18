@@ -150,6 +150,26 @@ class IncidentIndex:
             return None
         return Match(candidates[best].id, float(scores[best]))
 
+    def nearby(self, incident_id: str, radius_km: float, since: float) -> list[str]:
+        """Other located incidents within ``radius_km`` (≤ the cell size) updated since ``since``. O(k)."""
+        inc = self._incidents.get(incident_id)
+        if inc is None or inc.lat is None or inc.lng is None:
+            return []
+        ci, cj = self.cell_of(inc.lat, inc.lng)
+        found: list[str] = []
+        for di in (-1, 0, 1):
+            for dj in (-1, 0, 1):
+                for other_id in self._cells.get((ci + di, cj + dj), ()):
+                    other = self._incidents[other_id]
+                    if (
+                        other_id != incident_id
+                        and not other.department.startswith("silent:")
+                        and other.last_updated >= since
+                        and haversine_km(inc.lat, inc.lng, other.lat, other.lng) <= radius_km  # type: ignore[arg-type]
+                    ):
+                        found.append(other_id)
+        return found
+
     def find_twin(self, incident_id: str) -> Match | None:
         """Another open incident this one now matches at the join threshold. O(k·d)."""
         inc = self._incidents[incident_id]

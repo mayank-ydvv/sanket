@@ -75,7 +75,7 @@ class FakeBroadcaster:
 
 def meter(stats: LLMStats, reports: list[int], broadcaster: Any) -> CostMeter:
     return CostMeter(
-        stats,
+        [stats],
         {"qwen-test": Price(input=0.3, output=0.6)},
         Price(input=2.5, output=15.0),
         (1500, 500),
