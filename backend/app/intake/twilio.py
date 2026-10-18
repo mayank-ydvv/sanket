@@ -28,7 +28,9 @@ from app.stt.transcribe import STTChain, STTError
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/twilio", tags=["twilio"])
 
-GREETING_HI = "संकेत आपातकालीन सेवा। बीप के बाद बताइए क्या हुआ और आप कहाँ हैं। बोल नहीं सकते तो फ़ोन चालू रखिए।"
+GREETING_TA = "சங்கேத் அவசர சேவை. பீப் ஒலிக்குப் பிறகு என்ன நடந்தது, நீங்கள் எங்கே இருக்கிறீர்கள் என்று சொல்லுங்கள். பேச முடியாவிட்டால், இணைப்பிலேயே இருங்கள்."
+THANKS_TA = "நன்றி. உங்கள் தகவல் பதிவு செய்யப்பட்டது."
+TAMIL_VOICE = 'language="ta-IN" voice="Google.ta-IN-Standard-A"'
 GREETING_EN = "Sanket emergency line. After the beep, say what happened and where you are. If you cannot speak, stay on the line."
 DOWNLOAD_RETRIES = (0.5, 1.0, 2.0)
 
@@ -66,7 +68,7 @@ def twiml(body: str) -> Response:
 
 @router.post("/voice")
 async def voice(request: Request) -> Response:
-    """Greet in Hindi and English, then record up to VOICE_MAX_SECONDS.
+    """Greet in Tamil and English, then record up to VOICE_MAX_SECONDS.
 
     If the caller says nothing, <Record> falls through to the redirect, which
     reports a connected-but-silent call (a silent-SOS signal).
@@ -74,7 +76,7 @@ async def voice(request: Request) -> Response:
     await verified_form(request)
     settings: Settings = request.app.state.settings
     return twiml(
-        f'<Say language="hi-IN" voice="Polly.Aditi">{escape(GREETING_HI)}</Say>'
+        f"<Say {TAMIL_VOICE}>{escape(GREETING_TA)}</Say>"
         f'<Say language="en-IN" voice="Polly.Aditi">{escape(GREETING_EN)}</Say>'
         f'<Record action="/twilio/recording" method="POST" maxLength="{settings.voice_max_seconds}" '
         'timeout="6" playBeep="true" trim="trim-silence" finishOnKey="#"/>'
@@ -90,7 +92,7 @@ async def recording(request: Request) -> Response:
     request.app.state.voice_tasks.add(task)
     task.add_done_callback(request.app.state.voice_tasks.discard)
     return twiml(
-        '<Say language="hi-IN" voice="Polly.Aditi">धन्यवाद। आपकी सूचना दर्ज हो गई है।</Say>'
+        f"<Say {TAMIL_VOICE}>{escape(THANKS_TA)}</Say>"
         '<Say language="en-IN" voice="Polly.Aditi">Thank you. Your report has been recorded.</Say><Hangup/>'
     )
 

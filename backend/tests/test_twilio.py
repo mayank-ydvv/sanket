@@ -42,7 +42,7 @@ def media_and_stt(
         if request.url.host == "api.groq.com" and request.url.path.endswith("/audio/transcriptions"):
             if groq is not None:
                 return groq(request)
-            return httpx.Response(200, json={"text": "सेक्टर 62 में बिल्डिंग में आग लगी है, लोग फंसे हैं", "language": "hindi"})
+            return httpx.Response(200, json={"text": "எழும்பூரில் கட்டிடத்தில் தீ, மக்கள் சிக்கியுள்ளனர்", "language": "tamil"})
         return httpx.Response(404)
 
     return httpx.MockTransport(handler), calls
@@ -85,10 +85,10 @@ def test_voice_webhook_returns_bilingual_record_twiml(twilio_settings: Settings)
     assert response.status_code == 200 and response.headers["content-type"].startswith("application/xml")
     body = response.text
     assert '<Record action="/twilio/recording"' in body and 'maxLength="60"' in body
-    assert 'language="hi-IN"' in body and "<Redirect" in body
+    assert 'language="ta-IN"' in body and "<Redirect" in body
 
 
-def test_recorded_hindi_call_becomes_a_report(twilio_settings: Settings) -> None:
+def test_recorded_tamil_call_becomes_a_report(twilio_settings: Settings) -> None:
     transport, calls = media_and_stt()
     with TestClient(create_app(twilio_settings, transport)) as client, client.websocket_connect("/ws") as ws:
         response = signed_post(
@@ -98,10 +98,10 @@ def test_recorded_hindi_call_becomes_a_report(twilio_settings: Settings) -> None
         )
         assert "<Hangup/>" in response.text
         report = receive_event(ws, "report.created")["data"]
-    assert report["channel"] == "call" and report["language"] == "hi"
-    assert report["raw_text"].startswith("सेक्टर 62")
+    assert report["channel"] == "call" and report["language"] == "ta"
+    assert report["raw_text"].startswith("எழும்பூரில்")
     assert report["decision"]["severity"] >= 3  # trapped people: life-safety floor
-    assert report["lat"] is not None  # "सेक्टर 62" resolved by the gazetteer
+    assert report["lat"] is not None  # Tamil "in Egmore" resolved by the gazetteer
     assert any(c.endswith("RE1.mp3") for c in calls)
 
 
@@ -127,10 +127,10 @@ def test_failed_transcription_still_reaches_a_human(twilio_settings: Settings) -
 def test_sms_goes_into_the_pipeline(twilio_settings: Settings) -> None:
     transport, _ = media_and_stt()
     with TestClient(create_app(twilio_settings, transport)) as client, client.websocket_connect("/ws") as ws:
-        response = signed_post(client, "/twilio/sms", {"Body": "Sector 18 metro pe aag lagi hai", "From": "+919999000003"})
+        response = signed_post(client, "/twilio/sms", {"Body": "Marina beach pe aag lagi hai", "From": "+919999000003"})
         assert response.status_code == 200 and response.text.endswith("<Response></Response>")
         report = receive_event(ws, "report.created")["data"]
-    assert report["channel"] == "sms" and report["raw_text"] == "Sector 18 metro pe aag lagi hai"
+    assert report["channel"] == "sms" and report["raw_text"] == "Marina beach pe aag lagi hai"
     assert report["caller_hash"] and "9999000003" not in str(report)
 
 
