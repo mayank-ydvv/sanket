@@ -1,3 +1,4 @@
+import type { Translate } from "@/lib/i18n";
 import type { Alert, CostSnapshot, Incident, LiveEvent, Report, SimulationStatus } from "../types";
 
 export interface LiveState {
@@ -103,4 +104,13 @@ const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR",
 export function formatInr(value: number): string {
   if (value > 0 && value < 0.01) return "<₹0.01";
   return inr.format(value);
+}
+
+/** "Fire · Anna Nagar 2nd Avenue" in the UI language (the server's title is English). */
+export function incidentTitle(incident: Pick<Incident, "department" | "location_text">, t: Translate): string {
+  return `${t(`dept.${incident.department}`)} · ${incident.location_text ?? t("location.unconfirmed")}`;
+}
+
+export function reportCount(n: number, t: Translate): string {
+  return n === 1 ? t("reports.one") : t("reports.count", { n });
 }

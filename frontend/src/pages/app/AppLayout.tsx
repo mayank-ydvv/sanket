@@ -2,28 +2,32 @@ import { BarChart3, BellRing, LayoutDashboard, LogOut, Menu, Siren, X } from "lu
 import { useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { Logo } from "@/components/ui/Logo";
+import { LanguageToggle } from "@/components/ui/LanguageToggle";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useI18n } from "@/lib/i18n";
+import type { MessageKey } from "@/lib/messages";
 import { LiveProvider, useLive } from "@/lib/live";
 import { formatInr, liveAlertFor } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
-const NAV = [
-  { to: "/app", label: "Overview", icon: LayoutDashboard, end: true },
-  { to: "/app/incidents", label: "Incidents", icon: Siren, end: false },
-  { to: "/app/alerts", label: "Alerts", icon: BellRing, end: false },
-  { to: "/app/benchmark", label: "Benchmark", icon: BarChart3, end: false },
+const NAV: { to: string; label: MessageKey; icon: typeof Siren; end: boolean }[] = [
+  { to: "/app", label: "nav.overview", icon: LayoutDashboard, end: true },
+  { to: "/app/incidents", label: "nav.incidents", icon: Siren, end: false },
+  { to: "/app/alerts", label: "nav.alerts", icon: BellRing, end: false },
+  { to: "/app/benchmark", label: "nav.benchmark", icon: BarChart3, end: false },
 ];
 
-const TITLES: Record<string, string> = {
-  "/app": "Overview",
-  "/app/incidents": "Incidents",
-  "/app/alerts": "Alerts",
-  "/app/benchmark": "Benchmark & cost",
+const TITLES: Record<string, MessageKey> = {
+  "/app": "nav.overview",
+  "/app/incidents": "nav.incidents",
+  "/app/alerts": "nav.alerts",
+  "/app/benchmark": "title.benchmark",
 };
 
 function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
+  const { t } = useI18n();
   const { user, logout } = useAuth();
   const { state } = useLive();
   const navigate = useNavigate();
@@ -34,7 +38,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="flex h-full flex-col gap-6 p-4">
       <Logo to="/app" className="px-2 pt-1" />
-      <nav className="flex flex-col gap-1" aria-label="Sections">
+      <nav className="flex flex-col gap-1" aria-label={t("nav.sections")}>
         {NAV.map(({ to, label, icon: Icon, end }) => (
           <NavLink
             key={to}
@@ -49,7 +53,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             }
           >
             <Icon className="size-[18px]" />
-            <span className="flex-1">{label}</span>
+            <span className="flex-1">{t(label)}</span>
             {counts[to] ? (
               <span className="rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-white">{counts[to]}</span>
             ) : null}
@@ -72,8 +76,8 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               navigate("/");
             }}
             className="grid size-8 place-items-center rounded-lg text-mute transition hover:bg-surface-2 hover:text-ink"
-            aria-label="Log out"
-            title="Log out"
+            aria-label={t("top.logout")}
+            title={t("top.logout")}
           >
             <LogOut className="size-4" />
           </button>
@@ -95,41 +99,43 @@ function useServerMode(): string | null {
 }
 
 function TopBar({ onMenu }: { onMenu: () => void }) {
+  const { t } = useI18n();
   const { state, status } = useLive();
   const { pathname } = useLocation();
   const mode = useServerMode();
-  const title = TITLES[pathname] ?? "Control room";
+  const title = t(TITLES[pathname] ?? "title.controlRoom");
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-line bg-bg/80 px-4 backdrop-blur-xl sm:px-6">
-      <button type="button" onClick={onMenu} className="grid size-9 place-items-center rounded-lg text-ink-2 hover:bg-surface-2 lg:hidden" aria-label="Open menu">
+      <button type="button" onClick={onMenu} className="grid size-9 place-items-center rounded-lg text-ink-2 hover:bg-surface-2 lg:hidden" aria-label={t("top.openMenu")}>
         <Menu className="size-5" />
       </button>
-      <h1 className="font-display text-lg font-semibold">{title}</h1>
+      <h1 className="min-w-0 truncate font-display text-lg font-semibold">{title}</h1>
       <span
         className={cn(
-          "ml-1 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
+          "ml-1 inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
           status === "open" ? "bg-good/10 text-good" : "bg-warn/10 text-warn",
         )}
       >
         <span className={cn("size-1.5 rounded-full", status === "open" ? "bg-good" : "animate-pulse bg-warn")} />
-        {status === "open" ? "Live" : "Reconnecting"}
+        {status === "open" ? t("top.live") : t("top.reconnecting")}
       </span>
       {mode === "demo-replay" && (
         <span
           className="inline-flex items-center rounded-full bg-live/10 px-2.5 py-1 text-xs font-medium text-live"
-          title="LLM answers are replayed from a recorded run (DEMO_CACHE=true); no provider is called"
+          title={t("top.demoReplayHint")}
         >
-          Demo replay
+          {t("top.demoReplay")}
         </span>
       )}
-      <div className="ml-auto flex items-center gap-3">
+      <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
         {state.cost && (
-          <div className="hidden items-center gap-2 rounded-xl border border-line bg-surface px-3 py-1.5 text-xs md:flex" title="LLM cost at list price vs sending every report to a large reasoning model">
+          <div className="hidden items-center gap-2 rounded-xl border border-line bg-surface px-3 py-1.5 text-xs md:flex" title={t("top.costHint")}>
             <span className="font-mono font-semibold text-good">{formatInr(state.cost.sanket_inr)}</span>
-            <span className="text-mute">vs</span>
+            <span className="text-mute">{t("top.vs")}</span>
             <span className="font-mono font-semibold text-danger">{formatInr(state.cost.counterfactual_inr)}</span>
           </div>
         )}
+        <LanguageToggle />
         <ThemeToggle />
       </div>
     </header>
@@ -137,6 +143,7 @@ function TopBar({ onMenu }: { onMenu: () => void }) {
 }
 
 function Shell() {
+  const { t } = useI18n();
   const [menuOpen, setMenuOpen] = useState(false);
   return (
     <div className="flex h-full">
@@ -145,9 +152,9 @@ function Shell() {
       </aside>
       {menuOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
-          <button type="button" aria-label="Close menu" className="absolute inset-0 bg-black/40" onClick={() => setMenuOpen(false)} />
+          <button type="button" aria-label={t("top.closeMenu")} className="absolute inset-0 bg-black/40" onClick={() => setMenuOpen(false)} />
           <aside className="relative h-full w-72 border-r border-line bg-surface">
-            <button type="button" onClick={() => setMenuOpen(false)} className="absolute right-3 top-4 grid size-8 place-items-center rounded-lg text-mute" aria-label="Close menu">
+            <button type="button" onClick={() => setMenuOpen(false)} className="absolute right-3 top-4 grid size-8 place-items-center rounded-lg text-mute" aria-label={t("top.closeMenu")}>
               <X className="size-4" />
             </button>
             <Sidebar onNavigate={() => setMenuOpen(false)} />
