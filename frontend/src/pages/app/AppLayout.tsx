@@ -1,8 +1,9 @@
 import { BarChart3, BellRing, LayoutDashboard, LogOut, Menu, Siren, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { Logo } from "@/components/ui/Logo";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { LiveProvider, useLive } from "@/lib/live";
 import { formatInr, liveAlertFor } from "@/lib/store";
@@ -82,9 +83,21 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
+/** "demo-replay" when the API serves recorded LLM answers (DEMO_CACHE=true). */
+function useServerMode(): string | null {
+  const [mode, setMode] = useState<string | null>(null);
+  useEffect(() => {
+    api<{ mode?: string }>("/health")
+      .then((health) => setMode(health.mode ?? null))
+      .catch(() => setMode(null));
+  }, []);
+  return mode;
+}
+
 function TopBar({ onMenu }: { onMenu: () => void }) {
   const { state, status } = useLive();
   const { pathname } = useLocation();
+  const mode = useServerMode();
   const title = TITLES[pathname] ?? "Control room";
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-line bg-bg/80 px-4 backdrop-blur-xl sm:px-6">
@@ -101,6 +114,14 @@ function TopBar({ onMenu }: { onMenu: () => void }) {
         <span className={cn("size-1.5 rounded-full", status === "open" ? "bg-good" : "animate-pulse bg-warn")} />
         {status === "open" ? "Live" : "Reconnecting"}
       </span>
+      {mode === "demo-replay" && (
+        <span
+          className="inline-flex items-center rounded-full bg-live/10 px-2.5 py-1 text-xs font-medium text-live"
+          title="LLM answers are replayed from a recorded run (DEMO_CACHE=true); no provider is called"
+        >
+          Demo replay
+        </span>
+      )}
       <div className="ml-auto flex items-center gap-3">
         {state.cost && (
           <div className="hidden items-center gap-2 rounded-xl border border-line bg-surface px-3 py-1.5 text-xs md:flex" title="LLM cost at list price vs sending every report to a large reasoning model">
