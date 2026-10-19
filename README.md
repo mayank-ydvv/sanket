@@ -459,3 +459,7 @@ WebSocket require a session. `scripts/post_reports.py --email … --password …
 - **Twilio trial**: usually a US number, which only calls or texts verified phones.
 - **Single process, SQLite.** One API process holds the clustering index in memory. The
   schema uses portable types, but scaling out needs Postgres and a shared index.
+
+## License
+
+[MIT](LICENSE) © 2026 Mayank Yadav. The synthetic corpus and demo recording are included under the same license.
