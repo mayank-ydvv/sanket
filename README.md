@@ -1,20 +1,65 @@
-# Sanket — AI emergency triage agent
+# Sanket · AI emergency triage for Chennai
 
-Built for **Chennai**. Turns a flood of messy, multilingual emergency reports (calls, SMS,
-web) in Tamil, English, Hindi, Hinglish and Bengali into a short, ranked list of
-de-duplicated incidents, each routed to the right department within about two seconds, on
-free-tier models. Every non-English report carries an English translation, and the whole
-web app can be switched between English and Tamil. **System 1** (a local classifier plus a batched fast LLM
-for uncertain reports, then safety rules) decides every report. **System 2** (a reasoning
-model) looks only at complex incidents, links hazards across reports and writes crew
-briefings. Nothing is ever auto-dismissed. All data in this repo is synthetic.
+**When the phone lines flood, Sanket finds the signal.**
+
+Sanket (சங்கேத், "signal") is an AI control room for emergency calls. It takes a surge
+of messy, panicked reports in **Tamil, English, Hindi, Hinglish and Bengali**, with typos,
+shouting and duplicates included. Seconds later the dispatcher sees a short, ranked list
+of real incidents on a live Chennai map, each routed to the right department, each report
+with an **English translation**, in a web app that switches between **English and தமிழ்**.
+It runs on free-tier models, and nothing is ever auto-dismissed: uncertain calls go to a
+human.
+
+![Python](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![Tests](https://img.shields.io/badge/tests-157%20backend%20%2B%207%20web-brightgreen)
+![Data](https://img.shields.io/badge/data-100%25%20synthetic-orange)
+
+| 500 flood reports | become | in | at |
+|---|---|---|---|
+| 5 languages, duplicates, pranks, 2 silent SOS calls | **12 ranked incidents** on the map | **10.2 s** end to end | **₹0.94** of LLM tokens vs ₹478 for sending each report to a large model (**99.8% less**) |
+
+<p align="center">
+  <img src="docs/images/dashboard-tamil.jpg" width="49%" alt="Dispatcher overview in Tamil after a 500-report flood surge">
+  <img src="docs/images/incident-translations.jpg" width="49%" alt="Incident detail: each report with its English translation">
+</p>
+<p align="center">
+  <img src="docs/images/incident-briefing.jpg" width="80%" alt="Ranked incidents on the Chennai map with a System 2 crew briefing">
+</p>
+
+### How it thinks
+
+- **System 1, for every report, in about a millisecond.** A local multilingual
+  classifier (TF-IDF + logistic regression) answers first. Only uncertain reports go to a
+  fast LLM, 25 per request, which also returns an English translation. Safety rules run
+  last and can only make things *more* urgent: silent-SOS detection (tap codes, an empty
+  line, "can't talk"), a life-safety severity floor, and prank scoring that lowers rank but
+  never dismisses.
+- **Clustering.** Reports are placed with an offline Chennai gazetteer that understands
+  Tamil case endings ("முடிச்சூரில்" = "in Mudichur"), then merged into incidents using a
+  1 km grid plus multilingual sentence embeddings. Twenty callers about one fire become one
+  incident.
+- **Dispatch.** Confident incidents are auto-dispatched, the rest wait for a one-click
+  confirm or human review. Alerts escalate up the department's ladder every 90 s until
+  someone acknowledges. Every action is audited.
+- **System 2, only for complex incidents.** A reasoning model links hazards across reports
+  ("smoke on the 5th floor" + "gas smell near the lift" → explosion risk), suggests merges
+  for a human to confirm, and writes a 3-line crew briefing. It runs in the background, so
+  dispatch never waits for it.
+- **Built to survive a demo.** A provider fallback chain (Groq → Gemini → OpenRouter →
+  any OpenAI-compatible endpoint) with rate-limit awareness, a live cost ticker, and an
+  offline replay mode that runs the whole demo with no API keys and no internet.
+
+**Stack:** Python · FastAPI · asyncio · SQLite (WAL) · scikit-learn · sentence-transformers
+· React 19 · Vite · Tailwind v4 · Leaflet · Magic UI · Twilio (voice/SMS, optional).
 
 ## Quick start (3 commands)
 
 Needs Python 3.12+ (tested on 3.14) and Node 20+.
 
 ```bash
-git clone <this-repo> sanket && cd sanket
+git clone https://github.com/mayank-ydvv/sanket.git && cd sanket
 ./setup.sh
 ./run.sh --demo
 ```
